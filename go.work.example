@@ -1,0 +1,12 @@
+// Local development only. Copy to go.work (gitignored) to build against a
+// local gofastr checkout instead of the commit go.mod pins:
+//
+//   cp go.work.example go.work
+//
+// Verify a change builds the way a fresh clone does: GOWORK=off go build ./...
+go 1.27.3
+
+use (
+	.
+	../gofastr
+)

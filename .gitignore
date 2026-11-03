@@ -1,0 +1,17 @@
+# Build output: the only sanctioned build dir, never committed
+/dist/
+
+# Local development against a gofastr checkout (see go.work.example)
+go.work
+go.work.sum
+
+# Go
+*.test
+*.out
+coverage.*
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
