@@ -39,6 +39,19 @@ import (
 
 const origin = mobilehost.DefaultOrigin
 
+const offOriginProbeURL = "https://off-origin.example/probe"
+
+// offOriginProbeJS hands the transport a POST Request for another
+// origin and reports how it settled. The page's CSP (connect-src
+// 'self') may refuse the fetch before it reaches the network; that
+// refusal is reported as "csp:<url>".
+const offOriginProbeJS = `new Promise((done) => {
+	let csp = "";
+	document.addEventListener("securitypolicyviolation", (e) => { csp = e.blockedURI; });
+	window.__gofastr_transport(new Request("` + offOriginProbeURL + `", {method: "POST", body: "x"}))
+		.then(() => done("resolved"), (e) => setTimeout(() => done(csp ? "csp:" + csp : e.message), 100));
+})`
+
 const iPhoneUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 
 type stats struct {
@@ -343,7 +356,7 @@ func runPhone(t *testing.T, android bool) {
 	  document.body.appendChild(f);
 	  f.requestSubmit();
 	})()`
-	var marker, bodyText, path, echoed string
+	var marker, bodyText, path, echoed, offOrigin string
 	var transport bool
 	err = chromedp.Run(ctx,
 		cdpruntime.AddBinding("__simNativePost"),
@@ -356,6 +369,13 @@ func runPhone(t *testing.T, android bool) {
 		chromedp.WaitVisible(`a[href="/notes/create"]`, chromedp.ByQuery),
 		chromedp.Poll(`typeof window.__gofastr_transport === "function" && !!window.__simPort`, nil, chromedp.WithPollingTimeout(10*time.Second)),
 		chromedp.Evaluate(`typeof window.__gofastr_transport === "function"`, &transport),
+		// A request for another origin falls through to the page's own
+		// fetch. Built from a Request with a body, it must still go out:
+		// new Request(input) moves input's body, so a fallback that
+		// re-sends input throws before any request is made.
+		chromedp.Evaluate(offOriginProbeJS, &offOrigin, func(p *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {
+			return p.WithAwaitPromise(true)
+		}),
 		shot("01-list-empty-light"),
 		// Client-side navigation: a window marker set now must survive
 		// the click, or the router fell back to a full load.
@@ -416,7 +436,20 @@ func runPhone(t *testing.T, android bool) {
 	if st.bridged.Load() == 0 {
 		t.Errorf("no request went over the bridge")
 	}
-	if st.blocked.Load() != 0 {
-		t.Errorf("the page tried to reach %d off-origin URLs", st.blocked.Load())
+	// The probe counts as sent when the interceptor saw it or the CSP
+	// refused it; either way the page's fetch took the request.
+	probed := strings.HasPrefix(offOrigin, "csp:"+offOriginProbeURL)
+	others := st.blocked.Load()
+	for _, e := range st.errs {
+		if strings.Contains(e, offOriginProbeURL) {
+			probed = true
+			others--
+		}
+	}
+	if !probed {
+		t.Errorf("the off-origin Request never reached the page's fetch; the transport answered %q", offOrigin)
+	}
+	if others != 0 {
+		t.Errorf("the page tried to reach %d off-origin URLs besides the probe", others)
 	}
 }

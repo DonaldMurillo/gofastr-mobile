@@ -106,7 +106,8 @@
   // ---- the runtime's host transport ----------------------------------------
   async function transport(input, init) {
     const req = new Request(input, init);
-    if (!ours(new URL(req.url))) return fetch(input, init);
+    // req, not (input, init): new Request(input) moved input's body.
+    if (!ours(new URL(req.url))) return fetch(req);
     const sig = req.signal;
     sig.throwIfAborted();
     const msg = await toMessage(req, false);
