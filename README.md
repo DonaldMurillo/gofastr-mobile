@@ -12,8 +12,9 @@ public seam, not a copy here.
 
 ## The gofastr pin
 
-No gofastr release carries the seams this module uses yet, so `go.mod` pins a
-commit (a pseudo-version). The seams:
+No gofastr release carries the seams this module uses yet, so `go.mod` pins
+the gofastr main commit that merged them (#663, `6905b8f07`) as a
+pseudo-version. The seams:
 
 | Seam | What it does here |
 |---|---|

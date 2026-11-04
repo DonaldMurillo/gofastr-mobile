@@ -10,7 +10,7 @@ module github.com/DonaldMurillo/gofastr-mobile
 go 1.27.3
 
 require (
-	github.com/DonaldMurillo/gofastr v0.95.1-0.20261103172112-aba3b7105155
+	github.com/DonaldMurillo/gofastr v0.95.1-0.20261104000917-6905b8f07428
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
 	github.com/chromedp/chromedp v0.15.1
 )
