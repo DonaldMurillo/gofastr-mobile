@@ -358,6 +358,7 @@ func runPhone(t *testing.T, android bool) {
 	})()`
 	var marker, bodyText, path, echoed, offOrigin string
 	var transport bool
+	var lightBG, darkBG string
 	err = chromedp.Run(ctx,
 		cdpruntime.AddBinding("__simNativePost"),
 		page.Enable(),
@@ -365,6 +366,9 @@ func runPhone(t *testing.T, android bool) {
 		emulation.SetDeviceMetricsOverride(390, 844, 3, true),
 		emulation.SetTouchEmulationEnabled(true),
 		emulation.SetUserAgentOverride(iPhoneUA),
+		// Pin the light scheme: unset, headless Chrome follows the host's
+		// appearance, and the "-light" shots came out dark on a dark Mac.
+		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "light"}}),
 		chromedp.Navigate(origin+"/"),
 		chromedp.WaitVisible(`a[href="/notes/create"]`, chromedp.ByQuery),
 		chromedp.Poll(`typeof window.__gofastr_transport === "function" && !!window.__simPort`, nil, chromedp.WithPollingTimeout(10*time.Second)),
@@ -394,8 +398,10 @@ func runPhone(t *testing.T, android bool) {
 		chromedp.WaitVisible(`main`, chromedp.ByQuery),
 		chromedp.Text(`body`, &bodyText, chromedp.ByQuery),
 		shot("04-list-light"),
+		chromedp.Evaluate(`getComputedStyle(document.body).backgroundColor`, &lightBG),
 		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}),
 		chromedp.Sleep(300*time.Millisecond),
+		chromedp.Evaluate(`getComputedStyle(document.body).backgroundColor`, &darkBG),
 		shot("05-list-dark"),
 		chromedp.Click(`a[href="/notes/create"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`input[name="title"]`, chromedp.ByQuery),
@@ -420,6 +426,9 @@ func runPhone(t *testing.T, android bool) {
 		st.served.Load(), st.bridged.Load(), st.sse.Load(), st.blocked.Load(), path, dir)
 	if err != nil {
 		t.Fatalf("phone flow: %v", err)
+	}
+	if lightBG == darkBG {
+		t.Errorf("light and dark list backgrounds are both %q: the scheme emulation did not take", lightBG)
 	}
 	if !transport {
 		t.Errorf("bridge.js did not install window.__gofastr_transport")
