@@ -126,7 +126,10 @@ func runIOS(r *runner, a app, appDir string, opts runOpts) error {
 			return err
 		}
 	}
-	fmt.Fprintf(r.out, "\nRunning on simulator %s.\n  Logs:      xcrun simctl spawn %s log stream --predicate 'process == \"%s\"'\n  Inspector: Safari > Develop > Simulator > %s\n", udid, udid, a.Exe, a.Name)
+	fmt.Fprintf(r.out, "\nRunning on simulator %s.\n  Logs:      xcrun simctl spawn %s log stream --predicate 'process == \"%s\"'\n", udid, udid, a.Exe)
+	if a.HostTemplate == "" {
+		fmt.Fprintf(r.out, "  Inspector: Safari > Develop > Simulator > %s\n", a.Name)
+	}
 	return nil
 }
 

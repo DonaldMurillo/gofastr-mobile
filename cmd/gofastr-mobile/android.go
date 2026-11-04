@@ -213,7 +213,10 @@ func runAndroid(r *runner, a app, apk string, opts runOpts) error {
 			return err
 		}
 	}
-	fmt.Fprintf(r.out, "\nRunning on %s.\n  Logs:     %s -s %s logcat -s gofastr-mobile GoLog chromium\n  DevTools: chrome://inspect in desktop Chrome\n", serial, sdk.adb, serial)
+	fmt.Fprintf(r.out, "\nRunning on %s.\n  Logs:     %s -s %s logcat -s gofastr-mobile GoLog chromium\n", serial, sdk.adb, serial)
+	if a.HostTemplate == "" {
+		fmt.Fprintln(r.out, "  DevTools: chrome://inspect in desktop Chrome")
+	}
 	return nil
 }
 

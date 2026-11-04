@@ -34,12 +34,14 @@ Flags (build, run):
   --platform    ios-sim (iOS simulator, needs a Mac with Xcode installed)
                 android-emu (Android emulator or attached device, needs the
                 Android SDK, NDK and a JDK)
-  --pkg         the bind package: exports Start, Stop, Handle, Open, Bridge
-                (see examples/notes/notesmobile)
+  --pkg         the bind package: the default host uses Start, Stop, Handle,
+                Open, Bridge (see examples/notes/notesmobile); custom host
+                templates choose their own bind contract
   --id          bundle / application id (default dev.gofastr.<package>)
   --name        name on the home screen (default: the package name)
   --version     app version (default 0.1.0)
   --out         output directory (default dist/mobile/<platform>)
+  --host-template  caller-owned Swift/Java host template (default: WebView host)
   --dry-run     print every step without running it
 
 Flags (run only):
@@ -69,6 +71,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	name := fs.String("name", "", "home-screen name")
 	version := fs.String("version", "", "app version")
 	out := fs.String("out", "", "output directory")
+	hostTemplate := fs.String("host-template", "", "caller-owned native host template")
 	dry := fs.Bool("dry-run", false, "print the steps only")
 	device := fs.String("device", "", "simulator / device / AVD")
 	shot := fs.String("screenshot", "", "screenshot path")
@@ -102,6 +105,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "--wait must not be negative")
 		return 2
 	}
+	if *hostTemplate != "" {
+		resolved, err := filepath.Abs(*hostTemplate)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+			fmt.Fprintln(stderr, "--host-template must be a readable regular file under 1 MB")
+			return 2
+		}
+		*hostTemplate = resolved
+	}
 	pkgPath, pkgName, err := resolvePkg(r, *pkg)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -112,6 +128,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
+	a.HostTemplate = *hostTemplate
 	dir := *out
 	if dir == "" {
 		dir = filepath.Join("dist", "mobile", *platform)

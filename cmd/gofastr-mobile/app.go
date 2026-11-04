@@ -56,9 +56,10 @@ type app struct {
 	MinSDK      int
 	TargetSDK   int
 
-	Scheme string
-	Origin string
-	Host   string
+	Scheme       string
+	Origin       string
+	Host         string
+	HostTemplate string
 }
 
 var (
@@ -146,7 +147,13 @@ func (a app) forAndroid(targetSDK int) app {
 
 // render fills one embedded template.
 func render(path string, a app) ([]byte, error) {
-	src, err := templates.ReadFile(path)
+	var src []byte
+	var err error
+	if a.HostTemplate != "" && (path == "templates/ios/App.swift.tmpl" || path == "templates/android/MainActivity.java.tmpl") {
+		src, err = os.ReadFile(a.HostTemplate)
+	} else {
+		src, err = templates.ReadFile(path)
+	}
 	if err != nil {
 		return nil, err
 	}

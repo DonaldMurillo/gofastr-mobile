@@ -5,6 +5,10 @@ in-process and answers the WebView's requests over an in-memory listener:
 no socket, no port, no loopback origin. This is early work, not a supported
 feature yet.
 
+The Notes example also has an experimental **real UIKit presentation**: shared
+Go behavior, native controls, no WebView for its screens. See
+[Native Notes](docs/native-presentation.md).
+
 The module builds on gofastr's public API only. Go's `internal/` rule goes by
 import path, so this repository sees exactly what any other app sees. When it
 needs something the framework does not expose, the fix goes into gofastr as a
@@ -33,11 +37,34 @@ point it at the checkout. `go.work` is gitignored.
 |---|---|
 | `mobilehost/` | The host. `Options(data)` turns a `localapp.Data` into app options. `New(app, cfg)` registers the `mobile` battery (single-user identity), and `Start` runs the app on an in-memory listener. `Do` and `Open` serve one request buffered or streamed. `Bridge` answers one message from `bridge.js`. |
 | `mobilehost/bridge.js` | The page half of the native bridge: installs `window.__gofastr_transport` and sends native POST forms over the same channel. |
-| `examples/notes/notesapp/` | A notes app: an owner-scoped entity and entityui screens, zero CSS, adaptive theme. |
+| `mobileui/` | An experimental external mobile-web presentation package: iOS/Android components, styles, behavior, and adaptive themes, using GoFastr's public registry. |
+| `examples/notes/notesapp/` | Composes an owner-scoped entity, rendering-independent Notes service, and handwritten mobile screens. No CSS or structural screen markup. |
+| `examples/notes/notesweb/` | Handwritten task screens composed from `mobileui`, plus the HTTP save adapter. |
+| `examples/notes/notes/`, `notesstore/` | Typed application behavior and a temporary scoped-CRUD repository adapter. No presentation code. |
+| `examples/notes/notesterminal/` | A second, line-oriented presentation of the same service, without HTML or browser dependencies. Run with `go run ./examples/notes/cmd/notes-terminal --data /absolute/directory`. |
 | `examples/notes/notesmobile/` | The surface `gomobile bind` exports: `Start`, `Stop`, `Handle`, `Open`, `Bridge`, with strings, bytes and ints only. A scaffold would generate this file. |
+| `examples/notes/notesnative/` | A typed native binding: lifecycle, list/get/save commands, data snapshots, and centrally supplied installation identity. No HTTP screen contract. |
+| `examples/notes/native/ios/` | Caller-owned UIKit Notes screens: navigation, search, editing, keyboard avoidance, drafts, sharing, and native sheets. |
 | `cmd/gofastr-mobile/` | The CLI that builds the phone app and runs it on the iOS simulator or an Android emulator. No Xcode project, no Gradle. |
 | `cmd/gofastr-mobile/templates/` | The generated native shells: `App.swift` + `Info.plist` (WKURLSchemeHandler on `gofastr://app`, a `gofastr` script message handler) and `MainActivity.java` + `AndroidManifest.xml` (`shouldInterceptRequest` on `https://appassets.androidplatform.net`, a WebMessageChannel). |
 | `sim/` | A Chromium set up as a phone WebView (390x844 @3x, touch, phone UA). Every request is intercepted through the DevTools Fetch domain and answered by `mobilehost`; a MessagePort stands in for the native channel. |
+
+## External presentation prototype
+
+The notes example now uses an external mobile-web screen family, not desktop
+entityui screens at phone width. iOS and Android presentation modes share typed
+application behavior, not a universal widget tree. Both support light/dark,
+search, create/edit, explicit saves, validation, and session-only drafts.
+The terminal adapter demonstrates the same behavior without rendering HTML.
+
+The UIKit prototype takes the same boundary further with actual native controls
+and direct Go commands. It is selected by `--host-template`, not by changing
+GoFastr's web design system. No GoFastr code or production dependencies changed.
+The terminal and UIKit demos still share the web-oriented app bootstrap; this
+is not yet a host-neutral rendering runtime.
+See [the architecture, public APIs, validation, and limitations](docs/presentation-prototype.md)
+and [the native host contract](docs/native-presentation.md), plus
+[implementation notes](docs/agent-notes.md).
 
 ## Run the tests
 
@@ -71,6 +98,15 @@ iOS simulator (a Mac with Xcode):
 go run ./cmd/gofastr-mobile run --platform ios-sim --pkg ./examples/notes/notesmobile --screenshot dist/ios.png
 ```
 
+Real UIKit Notes (separate app and data, no WebView screens):
+
+```bash
+go run ./cmd/gofastr-mobile run --platform ios-sim \
+  --pkg ./examples/notes/notesnative \
+  --host-template ./examples/notes/native/ios/App.swift.tmpl \
+  --id dev.gofastr.notesnative --name 'Native Notes' --out dist/mobile/ios-native
+```
+
 Android emulator (an Android SDK with build-tools, a platform, the NDK, the
 emulator and one AVD, plus a JDK 17+):
 
@@ -82,6 +118,9 @@ go run ./cmd/gofastr-mobile run --platform android-emu --pkg ./examples/notes/no
 prints every step without running any. `--device` picks a simulator (name or
 UDID), an adb serial or an AVD. `--id` and `--name` set the bundle id and the
 display name. Output lands in `dist/mobile/<platform>/`.
+`--host-template` optionally selects caller-owned Swift/Java host source;
+without it the existing WebView hosts remain the default. The template and
+bind package must agree; see [the contract and limits](docs/native-presentation.md#caller-owned-host-templates).
 
 | iOS simulator | Android emulator |
 |---|---|
@@ -130,17 +169,22 @@ interception path and `Open`, which hands chunks over as they arrive.
 
 ## What has been verified
 
+- **Real UIKit Notes (iOS 26.5 simulator).** Native list/search, validation,
+  create/save/reopen, durable local draft restoration, dirty Back, system
+  keyboard avoidance, user-initiated share sheet, and medium/large native sheet.
+  Go command tests also open native-created data in web and terminal presenters.
 - **iOS simulator (iOS 26.5, Xcode on macOS).** The CLI builds and launches
   the notes app. Driven through the eval hook in the real `WKWebView`: the
   transport is installed and finds the `gofastr` handler, client navigation
   to the create form keeps window state, a note save goes over the bridge and
   the list shows it, and a native multipart form posts over the bridge and
   its answer becomes the next document.
-- **Chromium phone sim, both modes.** The list, client navigation, a save
-  (`POST /api/notes -> 201`) over the bridge, the toast, light and dark
-  themes, and a native multipart form whose `303` is followed in Go. In the
-  Android mode the sim strips every intercepted body, and the save and the
-  form still work, because their bodies come over the bridge.
+- **Chromium phone sim, both modes.** Handwritten mobile screens, client-side
+  navigation and saves (`POST /notes/save`), editing, validation, session-draft
+  restoration, search, light/dark, and 200% text at 320px. A native multipart
+  form's `303` is followed in Go. In Android mode every intercepted body is
+  stripped; saves and forms still work through the bridge. This is not an
+  Android-device or screen-reader test.
 - **Android shell compiles.** `MainActivity.java` compiles against gobind's
   generated bindings and the stubs.
 - **Single-user identity.** Rows carry a per-install owner id that survives a
@@ -166,13 +210,13 @@ interception path and `Open`, which hands chunks over as they arrive.
 - **Two internal helpers are copied.** `cmd/gofastr-mobile` copies
   `internal/fileperm.WriteOwnerOnly`, and `sim/` spells out the Chrome start
   timeouts that `internal/chromedptest` holds.
-- **The adaptive theme is opt-in** (`site.WithTheme(theme.Default())`). The
-  notes example sets it; a scaffold should too, because phone users expect
-  OS dark mode.
+- **The adaptive theme is opt-in.** The external Notes presentation selects
+  `mobileui.Theme(platform)`; a scaffold must also choose its presentation.
 - **The framework's 404 page has no styles.** On the phone it renders as bare
   HTML.
-- **The entityui list's empty state is clipped at 390px**, over plain TCP as
-  well.
+- **Host-neutral lifecycle is not extracted.** The Notes terminal and UIKit
+  renderers share behavior but still reuse the current web-oriented bootstrap. See
+  [the prototype's remaining seams](docs/presentation-prototype.md#what-this-suggests-for-gofastr).
 
 ## Next steps
 

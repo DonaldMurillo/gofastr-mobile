@@ -10,11 +10,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
 	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
+	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
 )
 
 var (
@@ -35,7 +37,11 @@ func Start(dataDir, origin string) error {
 	if host != nil {
 		return errors.New("notesmobile: already started")
 	}
-	_, h, err := notesapp.Build(dataDir, origin)
+	platform := mobileui.IOS
+	if runtime.GOOS == "android" {
+		platform = mobileui.Android
+	}
+	_, h, err := notesapp.BuildWithPlatform(dataDir, origin, platform)
 	if err != nil {
 		return err
 	}

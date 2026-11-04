@@ -35,6 +35,7 @@ import (
 
 	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
 	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
+	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
 )
 
 const origin = mobilehost.DefaultOrigin
@@ -252,7 +253,11 @@ func runPhone(t *testing.T, android bool) {
 	}
 	t.Cleanup(func() { owner.SetExtractor(nil) })
 
-	app, h, err := notesapp.Build(t.TempDir(), origin)
+	platform := mobileui.IOS
+	if android {
+		platform = mobileui.Android
+	}
+	app, h, err := notesapp.BuildWithPlatform(t.TempDir(), origin, platform)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,6 +349,13 @@ func runPhone(t *testing.T, android bool) {
 			return os.WriteFile(filepath.Join(dir, mode+"-"+name+".png"), buf, 0o600)
 		})
 	}
+	fill := func(selector, value string) chromedp.Action {
+		return chromedp.Evaluate(fmt.Sprintf(`(() => {
+		  const field = document.querySelector(%s);
+		  field.value = %s;
+		  field.dispatchEvent(new Event('input', { bubbles: true }));
+		})()`, mustJSON(selector), mustJSON(value)), nil)
+	}
 	// A native POST form with a file: the shape WebKit drops the body of
 	// and Android drops every body of.
 	const nativeFormJS = `(() => {
@@ -356,9 +368,10 @@ func runPhone(t *testing.T, android bool) {
 	  document.body.appendChild(f);
 	  f.requestSubmit();
 	})()`
-	var marker, bodyText, path, echoed, offOrigin string
+	var marker, saveMarker, bodyText, path, echoed, offOrigin, renderedPlatform string
 	var transport bool
 	var lightBG, darkBG string
+	var editorError, draftRestored, searchWorked, layoutFits, targetsFit bool
 	err = chromedp.Run(ctx,
 		cdpruntime.AddBinding("__simNativePost"),
 		page.Enable(),
@@ -371,6 +384,7 @@ func runPhone(t *testing.T, android bool) {
 		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "light"}}),
 		chromedp.Navigate(origin+"/"),
 		chromedp.WaitVisible(`a[href="/notes/create"]`, chromedp.ByQuery),
+		chromedp.AttributeValue(`[data-gfm-platform]`, "data-gfm-platform", &renderedPlatform, nil, chromedp.ByQuery),
 		chromedp.Poll(`typeof window.__gofastr_transport === "function" && !!window.__simPort`, nil, chromedp.WithPollingTimeout(10*time.Second)),
 		chromedp.Evaluate(`typeof window.__gofastr_transport === "function"`, &transport),
 		// A request for another origin falls through to the page's own
@@ -390,19 +404,54 @@ func runPhone(t *testing.T, android bool) {
 		shot("02-create-light"),
 		chromedp.SendKeys(`input[name="title"]`, "Groceries", chromedp.ByQuery),
 		chromedp.SendKeys(`textarea[name="body"]`, "Milk, eggs, coffee", chromedp.ByQuery),
-		chromedp.Click(`button[type="submit"]`, chromedp.ByQuery),
+		chromedp.Click(`button[form="note-editor"]`, chromedp.ByQuery),
 		chromedp.Poll(`!location.pathname.endsWith("/create") && document.body.innerText.includes("Groceries")`, nil, chromedp.WithPollingTimeout(15*time.Second)),
 		chromedp.Location(&path),
+		chromedp.Evaluate(`window.__simMarker || "lost"`, &saveMarker),
 		shot("03-after-save-light"),
-		chromedp.Navigate(origin+"/notes"),
-		chromedp.WaitVisible(`main`, chromedp.ByQuery),
+		fill(`input[name="title"]`, "Groceries draft"),
+		chromedp.Click(`a.gfm-back`, chromedp.ByQuery),
+		chromedp.WaitVisible(`a.gfm-row`, chromedp.ByQuery),
+		chromedp.Click(`a.gfm-row`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('input[name="title"]')?.value === 'Groceries draft'`, nil),
+		chromedp.Evaluate(`document.querySelector('[data-gfm-status]').textContent.includes('draft restored')`, &draftRestored),
+		fill(`input[name="title"]`, "   "),
+		chromedp.Click(`button[form="note-editor"]`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-gfm-editor]')?.dataset.gfmError === 'true'`, nil),
+		chromedp.Evaluate(`document.querySelector('[data-gfm-status]').textContent === 'Give your note a title.' && document.querySelector('textarea').value === 'Milk, eggs, coffee'`, &editorError),
+		fill(`input[name="title"]`, "Groceries"),
+		fill(`textarea[name="body"]`, "Milk, eggs, coffee\n\nPick up something fresh for the weekend."),
+		chromedp.Click(`button[form="note-editor"]`, chromedp.ByQuery),
+		chromedp.Poll(`document.querySelector('[data-gfm-editor]')?.dataset.gfmSaving !== 'true' && document.querySelector('[data-gfm-status]')?.textContent.startsWith('Saved on this device')`, nil),
+		chromedp.Click(`a.gfm-back`, chromedp.ByQuery),
+		waitForPath("/notes", 10*time.Second),
+		chromedp.WaitVisible(`a.gfm-row`, chromedp.ByQuery),
 		chromedp.Text(`body`, &bodyText, chromedp.ByQuery),
+		fill(`input[name="q"]`, "zz-no-match"),
+		chromedp.Click(`.gfm-search button`, chromedp.ByQuery),
+		chromedp.Poll(`document.body.innerText.includes('No matching notes')`, nil),
+		chromedp.Evaluate(`location.search.includes('zz-no-match') && !document.querySelector('.gfm-row')`, &searchWorked),
+		chromedp.Click(`.gfm-empty a`, chromedp.ByQuery),
+		chromedp.WaitVisible(`a.gfm-row`, chromedp.ByQuery),
 		shot("04-list-light"),
 		chromedp.Evaluate(`getComputedStyle(document.body).backgroundColor`, &lightBG),
 		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}),
 		chromedp.Sleep(300*time.Millisecond),
 		chromedp.Evaluate(`getComputedStyle(document.body).backgroundColor`, &darkBG),
 		shot("05-list-dark"),
+		chromedp.Click(`a.gfm-row`, chromedp.ByQuery),
+		chromedp.WaitVisible(`input[name="title"]`, chromedp.ByQuery),
+		shot("07-editor-dark"),
+		chromedp.Click(`a.gfm-back`, chromedp.ByQuery),
+		chromedp.WaitVisible(`a.gfm-row`, chromedp.ByQuery),
+		emulation.SetDeviceMetricsOverride(320, 844, 3, true),
+		chromedp.Evaluate(`document.documentElement.style.fontSize = '200%'`, nil),
+		chromedp.Sleep(100*time.Millisecond),
+		chromedp.Evaluate(`document.documentElement.scrollWidth <= innerWidth + 1`, &layoutFits),
+		chromedp.Evaluate(fmt.Sprintf(`Array.from(document.querySelectorAll('.gfm-nav-action, .gfm-search button, .gfm-fab, .gfm-row')).every(element => { const rect = element.getBoundingClientRect(); return rect.height >= %d && rect.width >= %d; })`, map[bool]int{false: 44, true: 48}[android], map[bool]int{false: 44, true: 48}[android]), &targetsFit),
+		shot("08-list-large-text"),
+		chromedp.Evaluate(`document.documentElement.style.fontSize = ''`, nil),
+		emulation.SetDeviceMetricsOverride(390, 844, 3, true),
 		chromedp.Click(`a[href="/notes/create"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`input[name="title"]`, chromedp.ByQuery),
 		shot("06-create-dark"),
@@ -435,6 +484,15 @@ func runPhone(t *testing.T, android bool) {
 	}
 	if marker != "kept" {
 		t.Errorf("navigation to /notes/create was a full page load, not a client-side swap")
+	}
+	if saveMarker != "kept" {
+		t.Error("saving replaced the document instead of using the existing router")
+	}
+	if renderedPlatform != string(platform) {
+		t.Errorf("platform = %q, want %q regardless of the iPhone user agent", renderedPlatform, platform)
+	}
+	if !draftRestored || !editorError || !searchWorked || !layoutFits || !targetsFit {
+		t.Errorf("mobile behavior: draft=%v validation=%v search=%v large-text-fit=%v touch-targets=%v", draftRestored, editorError, searchWorked, layoutFits, targetsFit)
 	}
 	if !strings.Contains(bodyText, "Groceries") {
 		t.Errorf("the saved note is not in the list")
