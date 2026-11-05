@@ -7,8 +7,8 @@ import (
 	"github.com/DonaldMurillo/gofastr/framework"
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesstore"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesstore"
 )
 
 // Application holds one installation's shared composition. Data.User is the

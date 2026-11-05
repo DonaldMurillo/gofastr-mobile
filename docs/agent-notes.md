@@ -1,5 +1,48 @@
 # Implementation notes
 
+## 2026-11-05 - Swipe snap-back must not animate open action targets
+- Scope: webview, gestures, acceptance.
+- Trigger: bounded real-pointer traces showed a summary hit on pointerdown and its row link on pointerup; stage 11 then began offscreen and left the menu open.
+- Approach: end snap-back when the row disclosure opens; keep the animation for closed menus and capture at most 80 interaction events on E2E failure.
+- Evidence: stationary-target regression failed in both styles before the CSS fix; `go test ./sim -run '^TestMobileComponentsWebView$' -count=30 -timeout=8m` then passed.
+- Next time: inspect down/up targets and computed geometry before blaming browser timing or changing event delivery.
+- Status: active; this proves the stage 11 cause, not the cause of every earlier stage 8 timeout.
+
+## 2026-11-05 - Rename branding without renaming compatibility contracts
+- Scope: repository, module, cli, compatibility.
+- Approach: use `github.com/DonaldMurillo/gofastr-native`, `cmd/gofastr-native`, and matching CI/docs; retain mobile package names, bridge hello/path, simulator debug variables, app IDs, and data locations.
+- Evidence: [rename migration](project-rename.md), CLI help/dry-run checks, 127 Node tests, fresh complete workspace/public-pin Go suites and vet, and a full UIKit simulator build/install preserving its notes. Earlier stage 8 timeouts did not recur after the separately proven stage 11 menu fix.
+- Next time: treat repository/module/CLI names separately from wire/storage identity; check both workspace and public-pin builds after import changes. A repository rename does not publish uncommitted source.
+- Status: active; native Android stays deferred and WebView stays supported.
+
+## 2026-11-05 - History departure needs the router's pre-navigation seam
+- Scope: webview, reliability, navigation.
+- Trigger: browser Back bypassed durable Keep, and capture-phase `popstate` interception did not stop the actual router despite passing DOM mocks.
+- Approach: compose `_interceptPopstate`, repair the tagged source entry, await Go leave/Keep, then replay with revision-bound permission. Reuse history lineage after reload; untagged history fails closed.
+- Evidence: `sim/reliability_test.go` holds real acknowledgement, cancels/retries, types during Keep, and recovers Forward without sessionStorage. Wait for dialog removal, not just `open=false`, before another traversal.
+- Acceptance waits: synchronize with committed screen route and instance, not URL alone or outgoing fields. Preserve query strings when checking a return from About; its destination may still be a filtered Notes list.
+- Next time: prove interception against the real bridge/router before trusting mocked event ordering; never build another navigator or replay a write to repair history.
+- Status: active; termination, foreign-history and actual OS/IME limits are in [mobile reliability](mobile-reliability.md).
+
+## 2026-11-05 - Durable acknowledgement and lifecycle fencing
+- Scope: nativeui, ios, drafts, lifecycle.
+- Trigger: failed checkpoints could admit writes/departure, and same-revision native replies could undo mutation state.
+- Approach: gate action/leave/effects on storage success, preserve buffers on failed cleanup, persist canonical keys first. Fence replies in both adapters, defer completion/leave/discard checkpoints, sequence short native calls, and bound background batches.
+- Evidence: Notes Stop/Start and ENOTDIR faults, wire/storage regressions, Foundation execution, and optimized UIKit linking. Details: [runtime](../nativeui/docs/agent-notes.md), [UIKit](../render/ios/docs/reliability.md).
+- Next time: keep long saves out of the checkpoint dependency chain; test unknown restart locks and newer text separately from clean completion.
+- Status: active; no crash exactly-once guarantee or native Android implementation.
+
+## 2026-11-05 - Retained controllers do not reactivate retired live sessions
+- Scope: lifecycle, ios, webview, live
+- Trigger: native tab restoration/reuse could display Retry because opening any other screen intentionally retires earlier watches on the connection.
+- Approach: recover only stale/expired watch instances with one read-only reopen, preserving collection controls/selection/scroll; retain visible errors on repeated failure or revoked authorization.
+- Cancellation race: the preceding worker may still be stopping after local abort; allow at most three 150ms `pending`/`cancelled` watch retries, never a mutation retry or unbounded reopen.
+- Evidence: `sim/reliability_test.go` reproduced the real-bridge failure in both platform modes; renderer tests cover bounded recovery, permanent errors, and suspended results. See [mobile reliability](mobile-reliability.md).
+- Next time: distinguish retained UI identity from active runtime identity; never auto-retry a save/device effect or reset the recovery budget during its own reopen.
+- Validation caveat: full race runs can hit a stale browser-node handle in `sim/files_test.go:117`; it also reproduces on untouched checkpoint `16786d5`. The recovery/editor/component race flows passed three repeats separately.
+- Component acceptance also intermittently times out at menu/touch stages 8/11; eight isolated final-code runs and the final public-pin suite passed. Failure output now includes the action index. Keep this caveat distinct from the three-repeat recovery race results.
+- Status: active
+
 ## 2026-11-05 - Checkpoint source without deleting app data
 - Scope: build, cleanup, verification
 - Trigger: feature work accumulated alongside multiple generated simulator builds.

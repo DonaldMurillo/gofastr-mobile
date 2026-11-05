@@ -8,12 +8,12 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/audio"
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/device/notifications"
-	"github.com/DonaldMurillo/gofastr-mobile/device/sharing"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/device/audio"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/notifications"
+	"github.com/DonaldMurillo/gofastr-native/device/sharing"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 const recordingMediaType = "application/vnd.gofastr.notes.audio+json"

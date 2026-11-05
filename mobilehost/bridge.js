@@ -1,4 +1,4 @@
-// gofastr-mobile bridge: carries the page's requests to the in-process Go
+// gofastr-native bridge: carries the page's requests to the in-process Go
 // app over the native shell's message channel instead of the WebView's
 // request interception, which drops what this channel keeps: Android's
 // WebResourceRequest has no body at all, WKURLSchemeHandler drops Blob
@@ -52,7 +52,7 @@
     });
   }
   const portReady = () => port ? Promise.resolve() : new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new TypeError('gofastr-mobile: no native bridge')), PORT_WAIT_MS);
+    const t = setTimeout(() => reject(new TypeError('gofastr-native: no native bridge')), PORT_WAIT_MS);
     waiters.push(() => { clearTimeout(t); resolve(); });
   });
   const send = async (msg) => {
@@ -116,7 +116,7 @@
       sig.addEventListener('abort', onAbort, { once: true });
       send(msg).then(resolve, reject).finally(() => sig.removeEventListener('abort', onAbort));
     });
-    if (reply.error) throw new TypeError('gofastr-mobile: ' + reply.error);
+    if (reply.error) throw new TypeError('gofastr-native: ' + reply.error);
     return toResponse(reply);
   }
   Object.defineProperty(window, '__gofastr_transport', { value: transport, writable: false, configurable: false });
@@ -154,6 +154,6 @@
     toMessage(new Request(action, init), true)
       .then(send)
       .then((reply) => { if (reply.error) throw new Error(reply.error); })
-      .catch((err) => console.error('[gofastr-mobile] form submission failed:', err && err.message));
+      .catch((err) => console.error('[gofastr-native] form submission failed:', err && err.message));
   });
 })();

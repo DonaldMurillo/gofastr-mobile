@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 	"github.com/DonaldMurillo/gofastr/framework/uihost"
 )
 

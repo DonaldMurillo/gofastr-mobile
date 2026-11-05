@@ -6,14 +6,14 @@ import (
 	"github.com/DonaldMurillo/gofastr/core/middleware"
 	"github.com/DonaldMurillo/gofastr/framework"
 
-	"github.com/DonaldMurillo/gofastr-mobile/behavior"
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesscreens"
-	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
-	screenweb "github.com/DonaldMurillo/gofastr-mobile/render/webview"
+	"github.com/DonaldMurillo/gofastr-native/behavior"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesscreens"
+	"github.com/DonaldMurillo/gofastr-native/mobilehost"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
+	screenweb "github.com/DonaldMurillo/gofastr-native/render/webview"
 )
 
 // BuildScreensWithPlatform renders the same Go mobile screen definitions used by

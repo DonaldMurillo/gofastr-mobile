@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 	"github.com/DonaldMurillo/gofastr/core/handler"
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 )

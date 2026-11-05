@@ -93,7 +93,7 @@ The library's iOS Info.plist includes a camera purpose string; the application
 does not provide a native template. Customize it with the CLI setting:
 
 ```sh
-go run ./cmd/gofastr-mobile run --platform ios-sim --renderer native \
+go run ./cmd/gofastr-native run --platform ios-sim --renderer native \
   --pkg ./examples/notes/notesnative \
   --camera-usage 'Take a photo to attach privately to your note.'
 ```

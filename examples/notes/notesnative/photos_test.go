@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/device/photos"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/photos"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func TestPhotosAttachThroughNativeBinding(t *testing.T) {

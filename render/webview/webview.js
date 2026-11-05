@@ -110,14 +110,27 @@
       return;
     }
     if (previous && local(state.config, previous)) {
-      history.back();
+      const revision = state.revision;
+      if (historyBarrier) historyBarrier.traverse(-1, () => current(state) && root.isConnected && state.revision === revision &&
+        !state.uncertain && !state.composing.size && !state.editor?.pending && !state.editor?.unknown && !modalOpen());
+      else history.back();
       return;
     }
     status(root, 'No earlier app screen is available. Returning to the start.');
     navigate(root, state, local(state.config, fallback) || state.config.root, { replace: true, force: true });
   };
 
-  const leave = async (root, state) => {
+  const confirmLeave = async state => {
+    if (typeof runtime?.loadModule === 'function' && document.querySelector('template[data-cui-confirm-dialog]')) {
+      await runtime.loadModule('confirm');
+      if (typeof runtime.askWords !== 'function') throw new Error('Draft confirmation is unavailable. Stay here and try again.');
+      return runtime.askWords({ message: state.form.dataset.huiLeaveGuardMessage || state.config.draft?.message || 'Keep this draft and leave?',
+        title: state.form.dataset.huiLeaveGuardTitle, accept: state.form.dataset.huiLeaveGuardAccept, danger: true });
+    }
+    return typeof window.confirm === 'function' && window.confirm(state.config.draft?.message || 'Keep this draft and leave?');
+  };
+
+  const leaveOnce = async (root, state) => {
     if (modalOpen()) {
       status(root, 'Finish or cancel the open modal task before leaving.', true);
       return false;
@@ -134,30 +147,47 @@
       status(root, 'Finish composing, or resolve the pending or uncertain action before leaving.', true);
       return false;
     }
+    const revision = state.revision;
     let reply;
     try { reply = await command(root, state, 'leave'); }
     catch (error) { if (current(state)) status(root, error.message || 'Could not verify that it is safe to leave.', true); return false; }
     if (!current(state) || !root.isConnected) return false;
     observe(root, state, reply);
     if (reply.error) { status(root, reply.error.message, true); return false; }
-    if (reply.editor?.canLeave !== false) return true;
+    if (revision !== state.revision || state.composing.size || state.busy) {
+      status(root, 'You kept editing. Your text is still here; finish the edit before leaving.');
+      return false;
+    }
+    if (reply.editor?.canLeave !== false) { formResult(state, true); return true; }
     if (reply.editor.pending) { status(root, 'Wait for the pending save before leaving.', true); return false; }
-    const confirmed = await new Promise(resolve => {
-      if (!runtime?._leaveGuard || runtime._leaveGuard.ok(document, () => resolve(true))) resolve(true);
-    });
-    if (!confirmed || !root.isConnected) return false;
+    let confirmed;
+    try { confirmed = await confirmLeave(state); }
+    catch (error) { status(root, error.message, true); return false; }
+    if (!confirmed || !current(state) || !root.isConnected || state.busy || state.composing.size) return false;
+    const keptRevision = state.revision;
     let kept;
     try { kept = await command(root, state, 'leave', { choice: 'keep' }); }
     catch (error) { if (current(state)) status(root, error.message || 'The draft could not be checkpointed. Stay here and try again.', true); return false; }
     if (!current(state) || !root.isConnected) return false;
     observe(root, state, kept);
-    if (kept.error || !kept.editor?.canLeave) {
+    if (kept.error || !kept.editor?.canLeave || keptRevision !== state.revision || state.composing.size || state.busy) {
       formResult(state, false);
       status(root, kept.error?.message || 'The draft could not be checkpointed. Stay here and save or discard it.', true);
       return false;
     }
     formResult(state, true);
     return true;
+  };
+
+  const leave = (root, state) => {
+    if (state.leaving) return state.leaving;
+    const release = holdCheckpoints(state);
+    state.leaving = leaveOnce(root, state).finally(() => {
+      state.leaving = undefined;
+      release();
+      if (current(state) && root.isConnected) state.live?.resume();
+    });
+    return state.leaving;
   };
 
   const capabilities = () => ({
@@ -195,6 +225,7 @@
   });
 
   const command = async (root, state, kind, extra = {}, options = {}) => {
+    if (!['checkpoint', 'watch'].includes(kind)) state.checkpointEpoch = (state.checkpointEpoch || 0) + 1;
     const hello = await connect(root);
     return request(root, { kind, connection: hello.connection, instance: state.instance,
       revision: state.revision, values: currentValues(state), ...extra }, options);
@@ -209,11 +240,31 @@
     }
   };
 
-  const checkpoint = async (root, state) => {
+  const holdCheckpoints = state => {
+    state.checkpointHolds = (state.checkpointHolds || 0) + 1;
+    state.checkpointEpoch = (state.checkpointEpoch || 0) + 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (--state.checkpointHolds === 0 && state.checkpointDeferred) {
+        state.checkpointDeferred = false;
+        void checkpoint(state.root, state, true).catch(error => {
+          if (current(state) && state.root.isConnected) status(state.root, error.message || 'Draft checkpoint failed. Your text is still here.', true);
+        });
+      }
+    };
+  };
+
+  const checkpoint = async (root, state, background = false) => {
     await state.ready;
-    if (!root.isConnected || !current(state) || !state.instance || state.composing.size) return;
+    if (!root.isConnected || !current(state) || !state.instance || (!background && state.composing.size)) return;
+    if (state.checkpointHolds) { state.checkpointDeferred = true; return; }
+    const epoch = state.checkpointEpoch || 0;
+    const sequence = state.checkpointSequence = (state.checkpointSequence || 0) + 1;
     const reply = await command(root, state, 'checkpoint');
-    if (!root.isConnected || !current(state) || reply.revision !== state.revision) return;
+    if (!root.isConnected || !current(state) || reply.revision !== state.revision ||
+        epoch !== (state.checkpointEpoch || 0) || sequence !== state.checkpointSequence) return;
     observe(root, state, reply);
     if (reply.error) status(root, reply.error.message, true);
     else if (!state.busy && dirty(state)) {
@@ -638,10 +689,39 @@
     scan(true);
   });
 
-  window.addEventListener('pagehide', () => {
-    for (const state of activeScreens) { saveTab(state); state.live?.suspend(); }
-  });
+  const background = () => {
+    for (const state of activeScreens) {
+      saveTab(state); state.live?.suspend();
+      if (!state.hasEditor || !current(state) || !state.root.isConnected) continue;
+      clearTimeout(state.checkpointTimer);
+      remember(state.root, state);
+      void checkpoint(state.root, state, true).catch(error => {
+        if (current(state)) status(state.root, error.message || 'The latest draft has not been checkpointed.', true);
+      });
+    }
+  };
+  window.addEventListener('pagehide', background);
   window.addEventListener('pageshow', () => { for (const state of activeScreens) state.live?.resume(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) background();
+    else for (const state of activeScreens) state.live?.resume();
+  });
+  const activeScreen = () => Array.from(activeScreens).find(state => current(state) && state.root.isConnected);
+  const historyBarrier = window.__gofastr_lifecycle?.createHistory({
+    required: () => {
+      const state = activeScreen();
+      return !!state && (state.hasEditor || state.config.draft || state.form.querySelector('[data-gfw-field]:not([type="hidden"])') ||
+        state.busy || state.uncertain || state.composing.size > 0 || modalOpen());
+    },
+    authorize: async () => {
+      const state = activeScreen();
+      if (!state || !(await leave(state.root, state))) return null;
+      const revision = state.revision;
+      return () => current(state) && state.root.isConnected && state.revision === revision && !state.busy &&
+        !state.uncertain && !state.composing.size && !state.editor?.pending && !state.editor?.unknown && !modalOpen();
+    },
+    report: message => { const state = activeScreen(); if (state) status(state.root, message, true); },
+  });
   let tabSaveTimer;
   window.addEventListener('scroll', () => {
     clearTimeout(tabSaveTimer);
@@ -650,7 +730,7 @@
   window.__gofastr_webview = {
     async openRoute(destination) {
       const state = Array.from(activeScreens).find(item => item.root.isConnected);
-      if (!state || typeof runtime?.navigate !== 'function' || !local(state.config, destination)) return false;
+      if (!state || historyBarrier?.pending || typeof runtime?.navigate !== 'function' || !local(state.config, destination)) return false;
       const epoch = state.navigationEpoch = (state.navigationEpoch || 0) + 1;
       if (!(await leave(state.root, state)) || !state.root.isConnected || epoch !== state.navigationEpoch) return false;
       navigate(state.root, state, destination, { force: true });
@@ -776,7 +856,7 @@
   document.addEventListener('gofastr:beforenavigate', (event) => {
     const root = event.target.closest?.('[data-gfw-screen]') || document.querySelector('[data-gfw-screen]');
     const state = root && initialized.get(root);
-    if (modalOpen() || (state && (state.busy || state.editor?.pending || state.editor?.unknown))) {
+    if (historyBarrier?.pending || modalOpen() || (state && (state.busy || state.leaving || state.editor?.pending || state.editor?.unknown))) {
       event.preventDefault();
       event.stopImmediatePropagation();
       if (state) status(root, 'Finish the open task or resolve the pending action before leaving.', true);
@@ -796,6 +876,12 @@
     const root = event.target.closest('[data-gfw-screen]');
     const state = root && initialized.get(root);
     if (!state || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (state.leaving || historyBarrier?.pending) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      status(root, 'Wait for the draft and navigation check to finish. Your text is still here.');
+      return;
+    }
     if (event.target.closest('[data-gfw-file-download-link], [data-gfw-service-download-link]')) return;
     if (event.target.closest('[data-gfw-live-controls]')) return;
     if (modalOpen() && !event.target.closest('[data-gfw-file], [data-gfw-presentation], [data-gfw-service]')) {
@@ -814,21 +900,32 @@
     const discard = event.target.closest('[data-gfw-discard]');
     if (discard) {
       if (state.busy || !window.confirm(state.config.draft.discard + '?')) return;
-      await state.ready;
-      state.revision++;
-      const reply = await command(root, state, 'leave', { choice: 'discard' });
-      observe(root, state, reply);
-      if (reply.error || !reply.editor?.canLeave) {
-        status(root, reply.error?.message || 'A pending or uncertain save cannot be discarded. Keep the draft and inspect the notes.', true);
-        return;
+      const finish = beginResponse(state);
+      const release = holdCheckpoints(state);
+      try {
+        await state.ready;
+        state.revision++;
+        const revision = state.revision;
+        const reply = await command(root, state, 'leave', { choice: 'discard' });
+        if (!current(state) || !root.isConnected) return;
+        observe(root, state, reply);
+        if (reply.error || !reply.editor?.canLeave || state.revision !== revision || state.composing.size) {
+          status(root, reply.error?.message || 'The draft changed or has a pending save. Your text is still here.', true);
+          return;
+        }
+        for (const field of state.form.querySelectorAll('[data-gfw-field]')) {
+          if (field.type !== 'hidden') components.setField(field, state.baseline[field.dataset.gfwField] ?? '');
+        }
+        const removed = removeDraft(state);
+        showFields(state);
+        formResult(state, true);
+        status(root, removed ? 'Draft discarded. Saved fields have not been changed.' : 'Fields restored, but the local draft could not be removed.', !removed);
+      } catch (error) {
+        if (current(state)) status(root, error.message || 'The draft could not be discarded. Your text is still here.', true);
+      } finally {
+        finish();
+        release();
       }
-      for (const field of state.form.querySelectorAll('[data-gfw-field]')) {
-        if (field.type !== 'hidden') components.setField(field, state.baseline[field.dataset.gfwField] ?? '');
-      }
-      const removed = removeDraft(state);
-      showFields(state);
-      formResult(state, true);
-      status(root, removed ? 'Draft discarded. Saved fields have not been changed.' : 'Fields restored, but the local draft could not be removed.', !removed);
       return;
     }
     const anchor = event.target.closest('a[href]');
@@ -971,7 +1068,9 @@
     syncSelection(state);
     resetSwipe();
     return () => {
-      if (!current(state)) return;
+      const release = state.completionCheckpoint;
+      state.completionCheckpoint = undefined;
+      if (!current(state)) { release?.(); return; }
       state.busy = false;
       state.form.removeAttribute('aria-busy');
       for (const [button, wasDisabled] of buttons) button.disabled = wasDisabled;
@@ -980,15 +1079,18 @@
         state.refreshAfterResponse = false;
         void state.live.refresh({ live: true });
       } else state.live?.resume();
+      release?.();
     };
   };
 
   const readCompletion = async (root, state, requestId) => {
-    let reply;
-    do {
-      reply = await command(root, state, 'complete', { requestId });
-    } while (root.isConnected && current(state) && (reply.error?.code === 'stale' || (reply.revision !== state.revision && !reply.error)));
-    return reply;
+    state.completionCheckpoint ||= holdCheckpoints(state);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const reply = await command(root, state, 'complete', { requestId });
+      if (!root.isConnected || !current(state) || !(reply.error?.code === 'stale' || (reply.revision !== state.revision && !reply.error))) return reply;
+    }
+    state.uncertain = true;
+    throw new Error('The operation outcome could not be confirmed for this buffer. It was not retried. Keep this draft and inspect saved items.');
   };
 
   const completeResponse = async (root, state, kind, requestId, extra) => {
@@ -1215,7 +1317,7 @@
       void updateQuery(root, state);
       return;
     }
-    if (form !== state.form || state.busy || state.queryPending || state.uncertain || state.composing.size) return;
+    if (form !== state.form || state.busy || state.leaving || historyBarrier?.pending || state.queryPending || state.uncertain || state.composing.size) return;
     const action = event.submitter?.value || '';
     const route = state.config.routes.find((item) => {
       const expected = item.path.split('/');

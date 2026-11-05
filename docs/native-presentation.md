@@ -1,6 +1,6 @@
 # Go-defined native presentation
 
-Application authors write **GoFastr-style Go screens using gofastr-mobile definitions**.
+Application authors write **GoFastr-style Go screens using gofastr-native definitions**.
 They do not write Swift, Java, HTML, CSS, or wire JSON. GoFastr remains web-first;
 this experiment is an external mobile presentation module, not a new core widget
 system. There are no GoFastr source changes or new production dependencies.
@@ -22,8 +22,8 @@ path; shared headless behaviors and stronger async guarantees remain in the
 | `examples/notes/notesnative/` | Installation identity, lifecycle, and thin gomobile entry points |
 | `examples/notes/notes`, `notesstore/` | Shared typed behavior, validation, repository access, and owner scopes |
 | `render/ios/GofastrNative.swift` | Ordinary, reusable UIKit renderer source: navigation, input state, local draft recovery, and native capabilities |
-| `cmd/gofastr-mobile/templates/ios/NativeApp.swift.tmpl` | Minimal generated application entry and gomobile binding adaptation |
-| `cmd/gofastr-mobile/` | Selects, binds, compiles, packages, and launches the renderer |
+| `cmd/gofastr-native/templates/ios/NativeApp.swift.tmpl` | Minimal generated application entry and gomobile binding adaptation |
+| `cmd/gofastr-native/` | Selects, binds, compiles, packages, and launches the renderer |
 
 The renderer is maintained as ordinary Swift source, with no template expansion
 or application binding imports. The CLI copies it unchanged and compiles it
@@ -43,7 +43,7 @@ They can share application services and choose their own presentation definition
 On a Mac with Xcode:
 
 ```sh
-go run ./cmd/gofastr-mobile run --platform ios-sim \
+go run ./cmd/gofastr-native run --platform ios-sim \
   --renderer native --pkg ./examples/notes/notesnative \
   --id dev.gofastr.notesnative --name 'Native Notes' \
   --out dist/mobile/ios-native
@@ -175,7 +175,7 @@ GoFastr checkout is modified.
 
 ## Verification
 
-`go test ./nativeui ./examples/notes/notesnative ./cmd/gofastr-mobile` checks
+`go test ./nativeui ./examples/notes/notesnative ./cmd/gofastr-native` checks
 route/action boundaries, definitions, create/search/edit/share/sheet effects,
 shared persistence/validation, no platform screen source in the Notes app, and
 renderer selection/rejection. Tests do not establish visual or platform parity.

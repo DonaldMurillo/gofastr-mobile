@@ -69,6 +69,9 @@ final class MobileTabController: UITabBarController, UITabBarControllerDelegate,
                 if initial.hasUncertainEditor { navigations[selectedIndex].pushViewController(initial, animated: false) }
                 else { initial.closeSession() }
             }
+            if let uncertain = navigations.firstIndex(where: { navigation in
+                navigation.viewControllers.contains { ($0 as? NativeScreenController)?.hasUncertainEditor == true }
+            }) { selectedIndex = uncertain }
             persist()
             ready?()
             return
@@ -103,9 +106,6 @@ final class MobileTabController: UITabBarController, UITabBarControllerDelegate,
         openRestorationRoute(routes[depth]) { [weak self] result in
             guard let self else { return }
             guard case .success(let reply) = result, reply.error == nil, let screen = reply.screen else {
-                let navigation = self.navigations[index]
-                navigation.viewControllers.dropFirst().forEach { ($0 as? NativeScreenController)?.closeSession() }
-                if let root = navigation.viewControllers.first { navigation.setViewControllers([root], animated: false) }
                 self.restoreTab(index + 1)
                 return
             }
@@ -120,9 +120,11 @@ final class MobileTabController: UITabBarController, UITabBarControllerDelegate,
         host.render(route, values: [:]) { [weak self] result in
             guard let self else { return }
             guard case .success(let response) = result, let screen = response.screen else { completion(.failure(MobileHost.failure(nil))); return }
-            if let key = screen.form?.draft?.key {
-                let retained = self.navigations.flatMap(\.viewControllers).compactMap { $0 as? NativeScreenController } + [self.initial]
-                guard !retained.contains(where: { $0.draftKey == key }) else { completion(.failure(MobileHost.failure(nil))); return }
+            let retained = self.retainedScreens + (self.initial.navigationController == nil ? [self.initial] : [])
+            guard MobileRestorationSafety.canOpen(route: screen.route, draftKey: screen.form?.draft?.key, editor: screen.form != nil,
+                retained: retained.map { MobileRetainedRoute(route: $0.route, draftKey: $0.draftKey, uncertain: $0.hasUncertainEditor) }) else {
+                completion(.failure(MobileHost.failure(nil)))
+                return
             }
             self.host.open(route, completion: completion)
         }
@@ -227,10 +229,5 @@ final class MobileTabController: UITabBarController, UITabBarControllerDelegate,
         if let data = try? JSONEncoder().encode(metadata), data.count <= 65536 { UserDefaults.standard.set(data, forKey: storageKey) }
     }
 
-    func checkpoint() {
-        persist()
-        for navigation in navigations {
-            for controller in navigation.viewControllers { (controller as? NativeScreenController)?.checkpointForBackground() }
-        }
-    }
+    var retainedScreens: [NativeScreenController] { navigations.flatMap(\.viewControllers).compactMap { $0 as? NativeScreenController } }
 }

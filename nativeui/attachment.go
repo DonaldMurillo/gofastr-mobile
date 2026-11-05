@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/audio"
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/audio"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
 )
 
 // Attachment presents file metadata and a registered detail destination, not

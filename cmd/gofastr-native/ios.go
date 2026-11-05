@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	hostios "github.com/DonaldMurillo/gofastr-mobile/mobilehost/ios"
-	renderios "github.com/DonaldMurillo/gofastr-mobile/render/ios"
+	hostios "github.com/DonaldMurillo/gofastr-native/mobilehost/ios"
+	renderios "github.com/DonaldMurillo/gofastr-native/render/ios"
 )
 
 // The iOS simulator build never touches an Xcode project. Like
@@ -38,7 +38,7 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 	}
 	sdk, err := r.output("find the iOS simulator SDK", "<iphonesimulator-sdk>", "xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
 	if err != nil {
-		return "", fmt.Errorf("%w\n    (is Xcode installed and selected? run: gofastr-mobile doctor --platform ios-sim)", err)
+		return "", fmt.Errorf("%w\n    (is Xcode installed and selected? run: gofastr-native doctor --platform ios-sim)", err)
 	}
 	xcf := filepath.Join(work, a.Prefix+".xcframework")
 	if err := r.run("bind the Go app as an iOS simulator framework",

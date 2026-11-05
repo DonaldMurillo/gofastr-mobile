@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/behavior"
+	"github.com/DonaldMurillo/gofastr-native/behavior"
 )
 
 func newEditor(t *testing.T, baseline behavior.Values) *behavior.Editor {

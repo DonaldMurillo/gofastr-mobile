@@ -10,7 +10,7 @@ import (
 
 	"github.com/DonaldMurillo/gofastr/framework/owner"
 
-	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
+	"github.com/DonaldMurillo/gofastr-native/mobilehost"
 )
 
 func startNotes(t *testing.T, dir string) *mobilehost.Host {

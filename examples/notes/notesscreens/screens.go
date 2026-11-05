@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 // Root is the initial mobile Notes screen for either renderer.

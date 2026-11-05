@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func behaviorRoutes() []nativeui.Route {

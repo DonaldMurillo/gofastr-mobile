@@ -1,15 +1,15 @@
 # Headless editor behavior
 
-`github.com/DonaldMurillo/gofastr-mobile/behavior` is an application-independent
+`github.com/DonaldMurillo/gofastr-native/behavior` is an application-independent
 Go editor policy and an optional file-backed draft store. It does not import
 GoFastr, `nativeui`, HTML, UIKit, or a particular application's model. All
 dependencies are in the Go standard library.
 
-This is one reusable M2 building block, **not evidence that both renderers have
-been integrated or passed M2 acceptance**. Parent/runtime integration owns the
-actual action dispatch, entity reads, bridge validation, navigation, and draft
-checkpoint acknowledgements. No Android implementation or device verification
-is included here.
+The shared runtime now integrates this policy with UIKit and WebView; see
+[runtime](mobile-runtime.md) and [reliability](mobile-reliability.md) for actual
+acknowledgement, restart, and history coverage. This package's unit tests alone
+are not renderer/device acceptance. Native Android and complete real-device
+lifecycle/IME/accessibility verification remain deferred.
 
 ## Exact integration API
 

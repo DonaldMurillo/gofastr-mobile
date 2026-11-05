@@ -3,6 +3,14 @@
 Service/live integration and stable parent acceptance selectors:
 [`services-live.md`](services-live.md).
 
+## 2026-11-05 - Open swipe menus need stationary hit targets
+- Scope: WebView row gestures and action disclosures.
+- Trigger: snap-back moved the summary from under a real pointer between down/up; the next gesture then started at an offscreen transformed coordinate.
+- Approach: disable the content transition while its row menu is open, retaining normal closed-menu snap-back and reduced-motion behavior.
+- Evidence: the computed-transform assertion in `sim/components_test.go` failed in both styles before the fix; 30 repetitions per style then passed with real CDP taps/swipes.
+- Next time: assert stationary targets as soon as actions are visible; do not hide moving hit areas with sleeps, retries, or scripted clicks.
+- Status: active.
+
 ## 2026-11-05 - Device work is one-shot; uncertain results recover by observation
 - Scope: WebView service settlement, foreground ownership and recorder cleanup.
 - Trigger: host performs may outlive browser activation; lost result receipts cannot safely repeat device operations.

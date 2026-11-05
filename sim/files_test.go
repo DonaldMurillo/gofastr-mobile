@@ -14,8 +14,8 @@ import (
 	"github.com/chromedp/cdproto/log"
 	"github.com/chromedp/chromedp"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
 	"github.com/DonaldMurillo/gofastr/framework/owner"
 )
 

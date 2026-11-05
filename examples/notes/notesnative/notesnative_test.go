@@ -13,10 +13,10 @@ import (
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 	"github.com/DonaldMurillo/gofastr/framework/owner"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesterminal"
-	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesterminal"
+	"github.com/DonaldMurillo/gofastr-native/mobilehost"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func TestNativeCommandsPersistAcrossRestarts(t *testing.T) {

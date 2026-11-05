@@ -3,7 +3,7 @@ package nativeui
 import (
 	"errors"
 
-	"github.com/DonaldMurillo/gofastr-mobile/behavior"
+	"github.com/DonaldMurillo/gofastr-native/behavior"
 )
 
 func validatePresentation(presentation Presentation, continuations map[string]Respond) error {

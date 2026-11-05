@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
 )
 
 // Run presents Notes through a reader and writer until quit or EOF, checking

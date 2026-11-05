@@ -73,6 +73,8 @@
     let cancelled = false;
     let failure = false;
     let loading = false;
+    let recoveryAttempted = false;
+    let transientAttempts = 0;
     let token = version || '';
     const panel = root.querySelector('[data-gfw-live-controls]') || element('div', '', { 'data-gfw-live-controls': '', role: 'group', 'aria-label': 'Collection loading' });
     let message = panel.querySelector('[data-gfw-live-status]');
@@ -114,6 +116,7 @@
     };
     const read = async (options = {}) => {
       if (!visible()) return false;
+      if (!options.recover) { recoveryAttempted = false; transientAttempts = 0; }
       abort();
       cancelled = failure = false;
       loading = true;
@@ -147,6 +150,8 @@
     };
     const poll = async () => {
       if (!visible()) { schedule(250); return; }
+      if (controller || loading) return;
+      let delay = 50;
       const epoch = generation;
       const before = identity();
       const active = controller = new AbortController();
@@ -155,7 +160,22 @@
       try {
         const reply = await watch(token, active.signal);
         if (retired || epoch !== generation || active.signal.aborted || !visible() || before !== identity()) return;
-        if (reply.error) throw new Error(reply.error.message);
+        if (reply.error) {
+          if (['pending', 'cancelled'].includes(reply.error.code) && transientAttempts++ < 3) {
+            delay = 150;
+            show('idle');
+            return;
+          }
+          if (['stale', 'expired'].includes(reply.error.code) && !recoveryAttempted) {
+            recoveryAttempted = true;
+            clearTimeout(timeout); controller = null;
+            await read({ recover: true });
+            return;
+          }
+          throw new Error(reply.error.message);
+        }
+        recoveryAttempted = false;
+        transientAttempts = 0;
         if (reply.changed) { clearTimeout(timeout); controller = null; await read({ live: true }); }
         else { token = reply.dataVersion || token; show('idle'); }
       } catch (error) {
@@ -165,7 +185,7 @@
         }
       } finally {
         clearTimeout(timeout);
-        if (epoch === generation) { controller = null; schedule(); }
+        if (epoch === generation) { controller = null; schedule(delay); }
       }
     };
     const cancelRead = () => {
@@ -174,7 +194,7 @@
     };
     const visibility = () => {
       abort(); loading = false;
-      if (!cancelled && !failure) { show('idle'); if (!document.hidden) schedule(); }
+      if (!cancelled && !failure) { recoveryAttempted = false; transientAttempts = 0; show('idle'); if (!document.hidden) schedule(); }
     };
     const retryRead = () => void read({ retry: true });
     retry.addEventListener('click', retryRead);
@@ -192,8 +212,8 @@
     void Promise.resolve(ready).then(() => schedule()).catch(() => {});
     return {
       refresh: read,
-      suspend() { abort(); loading = false; if (!cancelled && !failure) show('idle'); },
-      resume: () => schedule(),
+      suspend() { abort(); loading = false; if (!cancelled && !failure) { recoveryAttempted = false; show('idle'); } },
+      resume() { if (!cancelled && !failure) { recoveryAttempted = false; transientAttempts = 0; } schedule(); },
       close() {
         retired = true; abort();
         observer.disconnect?.();

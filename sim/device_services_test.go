@@ -16,9 +16,9 @@ import (
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
 )
 
 func TestNotesDeviceServicesProtocolWebView(t *testing.T) {

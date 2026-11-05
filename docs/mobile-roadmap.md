@@ -193,7 +193,7 @@ This is a responsibility map, not an instruction to create every package now.
 Keep current names until implementation validates the boundaries.
 
 ```text
-gofastr-mobile/
+gofastr-native/
   nativeui/                         current mobile screen/action definitions
   behavior/                        proposed small Go task controllers
   mobileapp/                       proposed sessions, command runner, host adapter
@@ -202,7 +202,7 @@ gofastr-mobile/
   render/webview/                  current mobile-definition web renderer
   mobileui/                        existing external web design system
   mobilehost/                      existing local WebView transport/compatibility
-  cmd/gofastr-mobile/templates/
+  cmd/gofastr-native/templates/
     ios/NativeApp.swift.tmpl        minimal native binding/bootstrap glue
     ios/App.swift.tmpl             existing WebView shell
     android/                       WebView today; native renderer later

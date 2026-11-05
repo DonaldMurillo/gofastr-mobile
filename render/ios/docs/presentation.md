@@ -28,7 +28,7 @@ still decode. A legacy backend without versioned commands gets an explicit
 
 ## Validation
 
-Run `GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-mobile ./render/ios`.
+Run `GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-native ./render/ios`.
 On macOS, this typechecks all embedded UIKit sources without Go bindings and runs
 Swift Foundation JSON/selection regression checks. A fresh gomobile bind,
 Swift compile/link, install, and launch passed on the iOS 26.5 simulator on

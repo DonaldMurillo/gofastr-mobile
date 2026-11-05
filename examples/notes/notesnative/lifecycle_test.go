@@ -16,22 +16,22 @@ import (
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 	"github.com/DonaldMurillo/gofastr/framework/owner"
 
-	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/mobilehost"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func TestNativeStartupDoesNotDependOnWebPresentation(t *testing.T) {
 	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
-	output, err := exec.Command("go", "list", "-deps", "github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesnative").CombinedOutput()
+	output, err := exec.Command("go", "list", "-deps", "github.com/DonaldMurillo/gofastr-native/examples/notes/notesnative").CombinedOutput()
 	if err != nil {
 		t.Fatalf("native dependency boundary: %v\n%s", err, output)
 	}
 	for _, dependency := range strings.Fields(string(output)) {
 		for _, forbidden := range []string{
-			"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp",
-			"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesweb",
-			"github.com/DonaldMurillo/gofastr-mobile/mobileui",
-			"github.com/DonaldMurillo/gofastr-mobile/render/webview",
+			"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp",
+			"github.com/DonaldMurillo/gofastr-native/examples/notes/notesweb",
+			"github.com/DonaldMurillo/gofastr-native/mobileui",
+			"github.com/DonaldMurillo/gofastr-native/render/webview",
 		} {
 			if dependency == forbidden {
 				t.Errorf("native bootstrap depends on a web presentation: %s", dependency)

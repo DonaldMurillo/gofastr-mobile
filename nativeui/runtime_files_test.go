@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
 )
 
 func TestFilesCapabilityAndUnknownMutationThroughCommands(t *testing.T) {

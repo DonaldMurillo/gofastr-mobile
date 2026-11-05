@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DonaldMurillo/gofastr-mobile/behavior"
+	"github.com/DonaldMurillo/gofastr-native/behavior"
 )
 
 func validateFields(fields []Field, keys map[string]bool) error {

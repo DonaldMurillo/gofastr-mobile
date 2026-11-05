@@ -1,15 +1,20 @@
-# gofastr-mobile
+# gofastr-native
 
-A GoFastr app running inside a phone app's process. The Go server runs
-in-process and answers the WebView's requests over an in-memory listener:
-no socket, no port, no loopback origin. This is early work, not a supported
-feature yet.
+Go-authored application screens, shared behaviors, and typed device services,
+with native UIKit and mobile WebView renderers. Application screens and actions
+are Go `nativeui` definitions. Apps write no Swift, HTML, CSS, or screen templates.
+The Notes example exercises the same definitions through either renderer.
+See [shared mobile screens](docs/shared-mobile-screens.md) and
+[Native Notes](docs/native-presentation.md).
 
-The Notes example also has experimental **shared Go mobile screens**:
-application screens and actions are Go `nativeui` definitions; the library renders
-them as real UIKit controls or mobile WebView screens. Apps write no Swift,
-HTML, CSS, or screen templates. See [shared mobile screens](docs/shared-mobile-screens.md)
-and [Native Notes](docs/native-presentation.md).
+Existing GoFastr web applications can also run inside a phone app's process.
+Their Go server answers WebView requests over an in-memory listener: no socket,
+no port, no loopback origin. Native rendering does not remove WebView support.
+This remains experimental, not a supported production framework yet.
+
+Previously named `gofastr-mobile`; the module and CLI are now `gofastr-native`.
+See [rename and migration](docs/project-rename.md) for the new paths and the
+compatibility identifiers deliberately left unchanged.
 
 The module builds on gofastr's public API only. Go's `internal/` rule goes by
 import path, so this repository sees exactly what any other app sees. When it
@@ -48,10 +53,10 @@ point it at the checkout. `go.work` is gitignored.
 | `nativeui/` | External mobile screen/action definitions in Go, local routing, and the gomobile wire envelope. |
 | `examples/notes/notesscreens/` | One Notes screen/action package, written only in Go using `nativeui`, consumed by UIKit and WebView. |
 | `examples/notes/notesnative/` | Thin native binding: lifecycle, screen rendering/action dispatch, compatibility data commands, and centrally supplied installation identity. |
-| `cmd/gofastr-mobile/` | The CLI that builds the phone app and runs it on the iOS simulator or an Android emulator. No Xcode project, no Gradle. |
+| `cmd/gofastr-native/` | The CLI that builds the phone app and runs it on the iOS simulator or an Android emulator. No Xcode project, no Gradle. |
 | `render/ios/` | Ordinary, binding-independent UIKit renderer source, copied verbatim and compiled alongside the generated app entry. |
 | `render/webview/` | Generic adapter from the same Go mobile definitions to `mobileui` components, actions, and GoFastr navigation. |
-| `cmd/gofastr-mobile/templates/` | Library-owned WebView shells and minimal native binding/bootstrap glue, plist, and manifest. Apps only supply Go screens. |
+| `cmd/gofastr-native/templates/` | Library-owned WebView shells and minimal native binding/bootstrap glue, plist, and manifest. Apps only supply Go screens. |
 | `sim/` | A Chromium set up as a phone WebView (390x844 @3x, touch, phone UA). Every request is intercepted through the DevTools Fetch domain and answered by `mobilehost`; a MessagePort stands in for the native channel. |
 
 ## External presentation prototype
@@ -118,6 +123,10 @@ working APIs and limits. The [mobile presentation roadmap](docs/mobile-roadmap.m
 tracks remaining shared headless task behaviors, async correctness, and explicit
 platform capabilities. Sharing definitions is not yet behavior parity.
 
+The [shared reliability layer](docs/mobile-reliability.md) gates actions/departure
+on durable drafts, guards app history Back/Forward, checkpoints on backgrounding,
+and recovers retired live reads without replaying writes or replacing inputs.
+
 ## Run the tests
 
 ```bash
@@ -133,7 +142,7 @@ when a working `javac` (JDK 17+) is on `PATH`; the test skips otherwise.
 
 ## Run it on a simulator or emulator
 
-`gofastr-mobile` does for phones what `gofastr desktop build` does for the
+`gofastr-native` does for phones what `gofastr desktop build` does for the
 Mac. It generates a small native shell, compiles it with the platform's
 command-line tools, assembles the `.app` or `.apk` itself, then installs and
 launches it. Xcode and the Android SDK must be installed; neither is opened.
@@ -142,19 +151,19 @@ Check the toolchain first. It is read-only and prints the fix for anything
 missing:
 
 ```bash
-go run ./cmd/gofastr-mobile doctor
+go run ./cmd/gofastr-native doctor
 ```
 
 iOS simulator (a Mac with Xcode):
 
 ```bash
-go run ./cmd/gofastr-mobile run --platform ios-sim --pkg ./examples/notes/notesmobile --screenshot dist/ios.png
+go run ./cmd/gofastr-native run --platform ios-sim --pkg ./examples/notes/notesmobile --screenshot dist/ios.png
 ```
 
 Real UIKit Notes (separate app and data, no WebView screens):
 
 ```bash
-go run ./cmd/gofastr-mobile run --platform ios-sim \
+go run ./cmd/gofastr-native run --platform ios-sim \
   --pkg ./examples/notes/notesnative \
   --renderer native \
   --id dev.gofastr.notesnative --name 'Native Notes' --out dist/mobile/ios-native
@@ -164,7 +173,7 @@ Android emulator (an Android SDK with build-tools, a platform, the NDK, the
 emulator and one AVD, plus a JDK 17+):
 
 ```bash
-go run ./cmd/gofastr-mobile run --platform android-emu --pkg ./examples/notes/notesmobile --screenshot dist/android.png
+go run ./cmd/gofastr-native run --platform android-emu --pkg ./examples/notes/notesmobile --screenshot dist/android.png
 ```
 
 `build` instead of `run` stops after the `.app` or `.apk`. `--dry-run`
@@ -275,7 +284,7 @@ interception path and `Open`, which hands chunks over as they arrive.
   process-owned event loop, windows, a tray and menus. What mobile wants is
   the OS-neutral half (the capability registry, grants, the bridge chokepoint,
   app state), and that lives inside `battery/desktop`.
-- **Two internal helpers are copied.** `cmd/gofastr-mobile` copies
+- **Two internal helpers are copied.** `cmd/gofastr-native` copies
   `internal/fileperm.WriteOwnerOnly`, and `sim/` spells out the Chrome start
   timeouts that `internal/chromedptest` holds.
 - **The adaptive theme is opt-in.** The external Notes presentation selects
@@ -285,10 +294,11 @@ interception path and `Open`, which hands chunks over as they arrive.
 - **Listener-free lifecycle is not extracted.** UIKit no longer mounts web
   screens, but its complete lifecycle still runs through in-memory Serve. See
   [Gate A versus Gate B](docs/mobile-lifecycle.md).
-- **Some async acceptance gaps remain.** Browser/OS history Back is not yet a
-  durable asynchronous leave barrier; keyed list updates, full IME/accessibility
-  fault runs and crash-safe mutation reconciliation remain work. Explicit app
-  Back/links and UIKit Keep Draft wait for Go checkpoint acknowledgement.
+- **Some async acceptance gaps remain.** App-tagged browser history and explicit
+  app departure now await Go acknowledgement. Untagged history fails closed;
+  immediate termination can still outrun checkpoints. Keyed list updates,
+  real-device lifecycle/IME/accessibility runs and crash-safe mutation
+  reconciliation remain work.
 
 ## Next steps
 

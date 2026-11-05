@@ -13,13 +13,13 @@ import (
 	"strings"
 	"testing"
 
-	hostios "github.com/DonaldMurillo/gofastr-mobile/mobilehost/ios"
-	renderios "github.com/DonaldMurillo/gofastr-mobile/render/ios"
+	hostios "github.com/DonaldMurillo/gofastr-native/mobilehost/ios"
+	renderios "github.com/DonaldMurillo/gofastr-native/render/ios"
 )
 
 func nativeApp(t *testing.T) app {
 	t.Helper()
-	application, err := newApp("github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesnative", "notesnative", "dev.gofastr.notesnative", "Native Notes", "")
+	application, err := newApp("github.com/DonaldMurillo/gofastr-native/examples/notes/notesnative", "notesnative", "dev.gofastr.notesnative", "Native Notes", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,11 +1,11 @@
-// gofastr-mobile runs a GoFastr app inside a phone app's process: the Go
-// server in-process, the WebView's requests served over an in-memory
-// listener, no socket. It builds on gofastr's public API only.
+// gofastr-native provides Go-authored screens, behaviors, and device services
+// with native UIKit and mobile WebView renderers. Existing GoFastr web apps
+// run over an in-memory listener, without sockets. It uses public APIs only.
 //
 // gofastr is pinned to a commit until a release carries the seams this
 // module needs (App.Serve, the runtime host transport, framework/localapp).
 // For local development against a gofastr checkout, see go.work.example.
-module github.com/DonaldMurillo/gofastr-mobile
+module github.com/DonaldMurillo/gofastr-native
 
 go 1.27.3
 

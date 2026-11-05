@@ -69,8 +69,8 @@ removes the directory after picker settlement/dismissal or preparation failure.
 
 ## Verification and next time
 
-Run `GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-mobile ./render/ios`
-and `GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go vet ./cmd/gofastr-mobile ./render/ios`.
+Run `GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-native ./render/ios`
+and `GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go vet ./cmd/gofastr-native ./render/ios`.
 The command package typechecks all bundled UIKit sources without Go bindings;
 the renderer package executes actual Swift DTO, bounded I/O, filename, export,
 permission mapping, and duplicate-callback state regressions on macOS. Source

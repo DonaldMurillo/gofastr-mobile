@@ -155,8 +155,8 @@ late result is invalidated and closed, not falsely claimed to be interrupted.
 ## Regression commands and limits
 
 ```sh
-GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-mobile ./render/ios
-GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go vet ./cmd/gofastr-mobile ./render/ios
+GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-native ./render/ios
+GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go vet ./cmd/gofastr-native ./render/ios
 ```
 
 `TestServicesSwiftWireBoundsAndOneShotLifecycle` compiles and executes optimized
@@ -181,6 +181,9 @@ acceptance must verify those, plus cold launch, VoiceOver, IME and real playback
 - Scope: `ios/live`. A watch must not occupy the action/checkpoint worker pool;
   cancellation needs both generation invalidation and a Go checkpoint to release
   the long-poll wait. Next time, test stale callbacks before adding automatic retry.
+- Scope: `ios/live`. Restored/retained controllers can outlive retired watch
+  instances. Use the bounded read-only policy in [mobile reliability](../../../docs/mobile-reliability.md),
+  not a hidden action retry or connection reset that invalidates dirty editors.
 - Scope: `ios/audio`. AVAudioRecorder writes may buffer until Stop; size polling
   alone cannot validate the final transfer. Next time, bound the final read and
   decode the actual container before exposing a successful recording result.

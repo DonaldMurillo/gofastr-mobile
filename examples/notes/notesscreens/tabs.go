@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func tabShell(routes []nativeui.Route) []nativeui.Route {
@@ -47,7 +47,7 @@ func settingsRoute() nativeui.Route {
 
 func aboutRoute(path, closeKind string) nativeui.Route {
 	return nativeui.Route{Path: path, Screen: func(context.Context, nativeui.Request) (nativeui.Screen, error) {
-		return nativeui.Screen{Title: "About Notes", Text: "Go-authored screens. Your choice of renderer.\n\nThis screen, the list, the editor, and their actions are defined once in Go using gofastr-mobile. The library renders them with UIKit or mobile WebView components; the application owns no platform screen source.\n\nNotes use the same owner-scoped Go service in either renderer. Unsaved drafts stay on this device and are separate from saved notes. Saved reminder fields do not confirm scheduling: choose Schedule explicitly, then check the device outcome. Android native services are deferred.",
+		return nativeui.Screen{Title: "About Notes", Text: "Go-authored screens. Your choice of renderer.\n\nThis screen, the list, the editor, and their actions are defined once in Go using gofastr-native. The library renders them with UIKit or mobile WebView components; the application owns no platform screen source.\n\nNotes use the same owner-scoped Go service in either renderer. Unsaved drafts stay on this device and are separate from saved notes. Saved reminder fields do not confirm scheduling: choose Schedule explicitly, then check the device outcome. Android native services are deferred.",
 			Actions: []nativeui.Action{{ID: "close", Label: "Done", Primary: true}}}, nil
 	}, Actions: map[string]nativeui.Handle{"close": navigate(closeKind, "")}}
 }

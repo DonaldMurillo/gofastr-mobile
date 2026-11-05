@@ -10,7 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
 )
 
 const (

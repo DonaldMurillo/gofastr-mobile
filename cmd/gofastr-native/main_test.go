@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-const notesPkg = "github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesmobile"
+const notesPkg = "github.com/DonaldMurillo/gofastr-native/examples/notes/notesmobile"
 
 func notesApp(t *testing.T) app {
 	t.Helper()
@@ -352,6 +352,26 @@ func TestDryRunPlans(t *testing.T) {
 			}
 			if entries, _ := os.ReadDir(out); len(entries) != 0 {
 				t.Errorf("a dry run wrote %d entries into --out", len(entries))
+			}
+		})
+	}
+}
+
+func TestCommandHelpUsesNativeIdentity(t *testing.T) {
+	for _, args := range [][]string{nil, {"help"}, {"-h"}, {"--help"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := run(context.Background(), args, &stdout, &stderr); code != 0 {
+				t.Fatalf("help exit %d: %s", code, stderr.String())
+			}
+			output := stdout.String()
+			for _, command := range []string{"doctor", "build", "run"} {
+				if !strings.Contains(output, "gofastr-native "+command) {
+					t.Errorf("help omits renamed %s command: %s", command, output)
+				}
+			}
+			if strings.Contains(output, "gofastr-mobile") || stderr.Len() != 0 {
+				t.Fatalf("help contains obsolete branding or diagnostics: %s\n%s", output, stderr.String())
 			}
 		})
 	}

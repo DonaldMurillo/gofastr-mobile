@@ -69,8 +69,11 @@ effect receipts, or OS tasks are persisted in this metadata. Startup disables
 interaction until reconstruction completes. Each restored destination is
 read-validated, then opened through the same Go host with a fresh instance/current
 saved baseline and Go draft restoration. Duplicate semantic draft keys are not
-opened again; uncertain editors are retained and stop deeper restoration. An
-unavailable saved destination collapses that tab to its registered root; an
+opened again; uncertain editors are retained, selected for inspection, and stop
+deeper restoration. While any retained editor is pending/unknown, restoration
+may open read-only roots but not speculative new editor sessions. A duplicate
+canonical route is rejected even without a draft key. An unavailable saved
+destination preserves the successfully restored prefix of that stack; an
 unavailable tab root is disabled, with the live startup root as final fallback.
 Restoration never dispatches actions, replays effects, or replaces a live pending
 editor. Normal future navigation is not limited to six live screens; only persisted
@@ -112,11 +115,16 @@ One validated cold-start target is queued until host negotiation/tab restoration
 finish; another URL while that slot is occupied returns false. URL handling requires
 the versioned command backend; legacy render/dispatch applications return false.
 
-The renderer observes will-resign-active/will-terminate to persist metadata and
-checkpoint loaded editors. A parent may additionally call `checkpoint()` from its
-background hook. It is asynchronous and does not guarantee storage before immediate
-process termination; the existing 250ms checkpoint/OS background-time limits remain.
-`stop()` retains the existing shutdown API.
+The renderer observes will-resign-active/did-enter-background to call `suspend()`,
+did-become-active to call `resume()`, and will-terminate for a best-effort checkpoint.
+The existing `checkpoint()` remains asynchronous and source compatible. Its new
+`checkpoint(completion:)` overload holds one shared UIKit background task until
+all submitted editor snapshots reply or the OS expires the task. Superseded,
+failed, pending/unknown, and expired/denied checkpoints return false; a dirty legacy
+UserDefaults backup is not claimed as a confirmed durable write. No hook waits
+synchronously for Go or guarantees storage before immediate process termination.
+`stop()` retains the existing shutdown API. See the exact lifecycle glue, sequencing
+contract, and limits in [native reliability](reliability.md).
 
 ## Accessibility identifiers
 
@@ -145,8 +153,8 @@ simulator dylib compile/link catches Swift definite-
 initialization and UIKit API errors that `-typecheck` can miss. Run:
 
 ```sh
-GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-mobile ./render/ios
-GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go vet ./cmd/gofastr-mobile ./render/ios
+GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-native ./render/ios
+GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go vet ./cmd/gofastr-native ./render/ios
 ```
 
 November 5 parent acceptance also built/bound/linked/installed/launched the app

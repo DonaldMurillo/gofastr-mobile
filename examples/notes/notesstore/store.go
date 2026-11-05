@@ -13,7 +13,7 @@ import (
 	"github.com/DonaldMurillo/gofastr/framework/crud"
 	"github.com/DonaldMurillo/gofastr/framework/filter"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
 )
 
 // Store preserves GoFastr's validation, hooks, and owner scopes.

@@ -116,6 +116,11 @@ Transferring capture from a starting link to its row ignores the link's bubbled
 loss event. A new pointerdown clears suppression from the previous gesture so
 the next deliberate tap is not swallowed.
 
+Opening row actions ends the content's snap-back transition immediately. A
+visible menu must not move its disclosure or action buttons between pointerdown
+and pointerup. The regular return animation remains for gestures that do not
+open a menu; reduced motion continues to disable it entirely.
+
 ## Stable selectors
 
 | Element | Selector |
@@ -146,10 +151,12 @@ definitions. Dependency-free Node tests cover serialization, restoration,
 thresholds/cancellation, wire effects, stale query leaves, and retained-root
 paging/Cancel→Apply/hidden-undo lifecycle. They are not a real browser or OS.
 Parent-owned `sim/components_test.go` also drives real CDP touch sequences for
-full-swipe unpin, trailing action reveal, immediate follow-up taps, and vertical
-scroll cancellation. These flows, multi-selection/confirmation/undo, typed-field
-persistence, tab draft recovery, and 200% text sizing pass three consecutive
-runs in both platform styles. Browser E2E remains distinct from device acceptance.
+full-swipe unpin, trailing action reveal, stationary open-menu targets, immediate
+follow-up taps, and vertical scroll cancellation. The stationary-target assertion
+failed in both styles before the renderer fix. These flows,
+multi-selection/confirmation/undo, typed-field persistence, tab draft recovery,
+and 200% text sizing pass 30 consecutive runs per style on November 5, 2026.
+Browser E2E remains distinct from device acceptance.
 
 Browser date/time pickers, pointer capture, edge Back, IME, focus restoration,
 localStorage lifetime, VoiceOver, haptics, downloads, and share behavior depend on

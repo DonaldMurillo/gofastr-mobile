@@ -94,5 +94,8 @@ Simulator and Chromium checks do not establish physical camera/microphone,
 VoiceOver/TalkBack, Android-native, or real-device acceptance.
 
 During native QA, returning to a retained Notes list sometimes exposed the
-existing stale-list Retry state; Retry recovered it. The lifecycle issue is
-separate from this design pass and remains unresolved, not visually suppressed.
+stale-list Retry state; Retry recovered it. The subsequent
+[shared reliability slice](mobile-reliability.md) adds bounded read-only session
+recovery in both renderers rather than suppressing the error visually. Native
+tab/foreground interaction acceptance is still separate from compilation and
+startup inspection.

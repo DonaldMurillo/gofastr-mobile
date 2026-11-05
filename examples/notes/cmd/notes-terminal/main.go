@@ -12,8 +12,8 @@ import (
 	"github.com/DonaldMurillo/gofastr/core/handler"
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesterminal"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesterminal"
 )
 
 func main() {

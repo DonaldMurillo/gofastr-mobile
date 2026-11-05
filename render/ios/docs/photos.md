@@ -97,7 +97,7 @@ ImageIO/system codecs and camera/provider UI still need device acceptance.
 Run:
 
 ```sh
-GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-mobile ./render/ios
+GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./cmd/gofastr-native ./render/ios
 GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go vet ./render/ios
 ```
 

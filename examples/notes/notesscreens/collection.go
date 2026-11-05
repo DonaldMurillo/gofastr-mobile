@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func tagOptions(emptyLabel string) []nativeui.Option {

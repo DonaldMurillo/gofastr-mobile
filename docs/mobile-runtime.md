@@ -71,6 +71,13 @@ can normalize to server-confirmed values and leave normally. File drafts use
 private modes, atomic synced writes, and token/revision-conditional cleanup.
 They are not encrypted, cloud-synced, or committed repository records.
 
+With configured draft storage, failed admission checkpoints return `draft`
+without executing the action. Failed completion persistence blocks navigation
+and effects; read-only completion retry never reruns the mutation. Discard waits
+for conditional cleanup, clean residue does not override fresh repository data,
+and canonical draft-key migration stores the new key first. See
+[reliability guarantees and fault coverage](mobile-reliability.md).
+
 The default runtime retains at most 128 connections/screens, 64 action records
 per screen, and expires idle sessions after 30 minutes. Limits are configurable
 within documented constructor bounds. JSON commands are capped at 8 MiB.
@@ -82,20 +89,26 @@ not cross-process coordination for a shared draft directory.
 
 ## Honest adapter limits
 
+Retained live collections use [bounded read-only recovery](mobile-reliability.md)
+when their watch instance is retired or expired. This does not retry mutations
+or silently renegotiate an expired renderer connection.
+
 - UIKit has real navigation, sheets, keyboard controls and share cancellation
   callbacks. Existing controllers/inputs are retained during saves; collection
   refresh still reloads its table rather than using keyed row reconciliation.
-- WebView keeps GoFastr navigation/history. App links and the visible Back action
-  checkpoint through Go before leaving; browser/OS history Back still uses the
-  existing GoFastr leave guard, not a full asynchronous durable-leave barrier.
-  Its 250ms checkpoint window remains a loss risk under immediate termination.
+- WebView keeps GoFastr navigation/history. App links and app-tagged browser/OS
+  Back/Forward wait for Go leave/checkpoint acknowledgement. Untagged history
+  fails closed with an in-app navigation fallback. Background events initiate
+  immediate checkpoints; hard reload/termination can still outrun that work.
 - Older route-navigation WebView sheets are full pages; shared Go presentations
   now use actual overlays. Sharing may use copy fallback; haptics may be
   unavailable. Fallbacks and observed receipts are explicit. Issuing a haptic
   or announcement does not prove a user physically perceived it.
-- Receipts are best-effort session observations, not transactional OS effects.
-  Background suspension/termination, complete IME/VoiceOver/TalkBack coverage,
-  deep links, restoration, tabs and Android native remain further work.
+- UIKit sequences checkpoints, fences obsolete replies, and offers bounded
+  background batches; see its [lifecycle contract](../render/ios/docs/reliability.md).
+- Receipts are best-effort observations, not transactional OS effects. Actual OS
+  suspension/termination, full IME/VoiceOver/TalkBack and physical-device
+  deep-link/restoration/tab acceptance remain work. Native Android is deferred.
 
 ## Verification
 

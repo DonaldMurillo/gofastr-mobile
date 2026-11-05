@@ -2,7 +2,7 @@
 
 This is an implementation experiment, not a new cross-platform rendering API.
 GoFastr remains web-first. The mobile presentation lives **outside GoFastr** in
-the importable `github.com/DonaldMurillo/gofastr-mobile/mobileui` package. No
+the importable `github.com/DonaldMurillo/gofastr-native/mobileui` package. No
 changes to either GoFastr checkout are needed, and no dependencies were added.
 An additional [Go-defined native presenter](native-presentation.md) exercises
 the boundary with real UIKit controls. Apps compose mobile screens/actions in
@@ -91,7 +91,7 @@ mutations require a refresh. Drafts are not merged with concurrent writes.
 The existing native shell build command uses the new presentation automatically:
 
 ```sh
-go run ./cmd/gofastr-mobile run --platform ios-sim \
+go run ./cmd/gofastr-native run --platform ios-sim \
   --pkg ./examples/notes/notesmobile --id dev.gofastr.notesprototype \
   --name 'Notes Prototype'
 ```

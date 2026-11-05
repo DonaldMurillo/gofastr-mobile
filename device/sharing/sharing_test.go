@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
 )
 
 func TestDecodedCombinedBytesAndClipboard(t *testing.T) {

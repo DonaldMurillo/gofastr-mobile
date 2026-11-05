@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func TestOneNotesApplicationShowsEveryPresentation(t *testing.T) {

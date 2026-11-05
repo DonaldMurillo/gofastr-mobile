@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/audio"
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/device/notifications"
-	"github.com/DonaldMurillo/gofastr-mobile/device/sharing"
+	"github.com/DonaldMurillo/gofastr-native/device/audio"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/notifications"
+	"github.com/DonaldMurillo/gofastr-native/device/sharing"
 )
 
 func serviceCommand(t *testing.T, ctx context.Context, runtime *Runtime, command Command) Reply {

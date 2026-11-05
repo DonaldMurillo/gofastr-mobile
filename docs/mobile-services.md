@@ -66,7 +66,7 @@ contexts. See [lifecycle ownership](mobile-lifecycle.md).
 
 ```sh
 GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./sim -run 'TestNotes(AudioRecordingBrowser|DeviceServicesProtocolWebView|BrowserReminderUnsupported|LivePagingWebView)$' -count=3
-GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./nativeui ./behavior ./device/... ./examples/notes/... ./cmd/gofastr-mobile ./mobilehost/ios ./render/ios ./render/webview
+GOCACHE=/tmp/gofastr-native-build-cache.IUXdIL go test ./nativeui ./behavior ./device/... ./examples/notes/... ./cmd/gofastr-native ./mobilehost/ios ./render/ios ./render/webview
 node --test render/webview/*.test.cjs
 ```
 

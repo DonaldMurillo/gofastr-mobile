@@ -279,7 +279,7 @@ func bootstrapGomobile(r *runner, bin string) error {
 	}
 	for _, tool := range []string{"gomobile", "gobind"} {
 		if err := r.run("build "+tool+" at the version go.mod pins", "go", "build", "-o", filepath.Join(bin, tool), "golang.org/x/mobile/cmd/"+tool); err != nil {
-			return fmt.Errorf("%w\n    (the module running gofastr-mobile must require golang.org/x/mobile: go get -tool golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind)", err)
+			return fmt.Errorf("%w\n    (the module running gofastr-native must require golang.org/x/mobile: go get -tool golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind)", err)
 		}
 	}
 	r.env = append(r.env, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))

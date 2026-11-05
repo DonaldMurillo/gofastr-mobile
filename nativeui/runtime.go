@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/DonaldMurillo/gofastr-mobile/behavior"
+	"github.com/DonaldMurillo/gofastr-native/behavior"
 )
 
 // RuntimeOptions supplies installation-owned storage and deterministic time.
@@ -56,6 +56,8 @@ type runtimeSession struct {
 	draft           *behavior.DraftRevision
 	restored        bool
 	draftStored     bool
+	draftFailed     bool
+	nextDraftKey    string
 	used            time.Time
 	active          bool
 	closed          bool
@@ -209,7 +211,7 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 		}
 		return reply
 	}
-	if command.Kind != "complete" && !runtime.ownsDraft(session) {
+	if !runtime.ownsDraft(session) {
 		reply.Error = commandFailure("superseded", "This draft was opened in a newer screen. Reopen this editor before making further changes.")
 		return reply
 	}
@@ -243,12 +245,16 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 		if command.Choice == "discard" && session.editor != nil {
 			snapshot := session.editor.Snapshot()
 			if !snapshot.Pending && snapshot.Outcome != behavior.SaveUnknown {
+				if failure := runtime.clearDraft(ctx, session); failure != nil {
+					reply.Error, reply.Editor = failure, runtime.editorState(session)
+					return reply
+				}
 				session.editor.Checkpoint(snapshot.Baseline)
 			}
 		}
-		runtime.persist(ctx, session)
+		reply.Error = runtime.persist(ctx, session)
 		reply.Editor = runtime.editorState(session)
-		if command.Kind == "leave" && command.Choice == "keep" && reply.Editor != nil && !reply.Editor.Pending && reply.Editor.DraftStored {
+		if command.Kind == "leave" && command.Choice == "keep" && reply.Error == nil && reply.Editor != nil && !reply.Editor.Pending && !reply.Editor.Unknown && reply.Editor.DraftStored {
 			reply.Editor.CanLeave = true
 		}
 	case "action":
@@ -317,6 +323,10 @@ func (runtime *Runtime) open(ctx context.Context, command Command, contract Cont
 				return reply
 			}
 			if found {
+				revision := draft.DraftRevision()
+				session.draft, session.draftStored = &revision, true
+			}
+			if found && (draft.Pending || draft.Outcome == behavior.SaveUnknown || !maps.Equal(draft.Current, draft.Baseline)) {
 				current := map[string]string(editorValues(screen, draft.Current))
 				for _, field := range screen.Form.Fields {
 					if field.Disabled {
@@ -330,8 +340,6 @@ func (runtime *Runtime) open(ctx context.Context, command Command, contract Cont
 					return reply
 				}
 				session.restored = true
-				revision := draft.DraftRevision()
-				session.draft, session.draftStored = &revision, true
 			}
 		}
 	}
@@ -424,7 +432,13 @@ func (runtime *Runtime) action(ctx context.Context, session *runtimeSession, com
 			return reply
 		}
 		record.submitted = begin.Submission
-		runtime.persist(ctx, session)
+	}
+	if failure := runtime.persist(ctx, session); failure != nil {
+		if record.submitted != nil {
+			session.editor.Complete(behavior.Result{InstanceID: record.submitted.InstanceID, Token: record.submitted.Token, Revision: record.submitted.Revision, Outcome: behavior.SaveFailed}, editorValues(session.screen, values))
+		}
+		reply.Error, reply.Editor = failure, runtime.editorState(session)
+		return reply
 	}
 	session.actions[command.RequestID], session.active = record, true
 	screen := session.screen
@@ -487,14 +501,7 @@ func (runtime *Runtime) complete(ctx context.Context, session *runtimeSession, c
 			}
 			session.screen.Form = &form
 			if saved.DraftKey != "" && saved.DraftKey != session.draftKey {
-				runtime.clearDraft(ctx, session)
-				runtime.releaseDraft(session)
-				session.draftKey, session.draft = saved.DraftKey, nil
-				runtime.draftWrites.Lock()
-				if runtime.draftOwners[saved.DraftKey] == "" {
-					runtime.draftOwners[saved.DraftKey] = session.editor.Snapshot().InstanceID
-				}
-				runtime.draftWrites.Unlock()
+				session.nextDraftKey = saved.DraftKey
 			}
 			session.screen.Route = saved.Route
 		}
@@ -509,9 +516,16 @@ func (runtime *Runtime) complete(ctx context.Context, session *runtimeSession, c
 	if record.resolves != "" && session.service != nil && session.service.id == record.resolves {
 		runtime.releaseService(session)
 	}
-	runtime.persist(ctx, session)
+	persistFailure := runtime.persist(ctx, session)
 	reply.Editor, reply.Error = runtime.editorState(session), record.failure
 	response := record.response
+	if persistFailure != nil {
+		reply.Error = persistFailure
+		response.Screen, response.Navigation, response.Presentation, response.Files, response.Service = nil, nil, nil, nil, nil
+		response.Share, response.Haptic, response.Announcement, response.ClearDraft = "", "", "", false
+		reply.Response = &response
+		return reply
+	}
 	if reply.Editor != nil && !reply.Editor.CanNavigate {
 		response.ClearDraft = false
 		if response.Navigation != nil {
@@ -548,50 +562,91 @@ func (runtime *Runtime) editorState(session *runtimeSession) *EditorState {
 	leave := session.editor.Leave(snapshot.Current)
 	return &EditorState{Baseline: snapshot.Baseline, Values: snapshot.Current, Revision: session.revision, Dirty: snapshot.Dirty, Pending: snapshot.Pending,
 		Unknown: snapshot.Outcome == behavior.SaveUnknown || session.uncertain, Restored: session.restored, DraftStored: session.draftStored,
-		CanLeave: leave.Disposition == behavior.LeaveAllow && !session.uncertain && session.service == nil, CanNavigate: !snapshot.Dirty && !snapshot.Pending && snapshot.Outcome != behavior.SaveUnknown && !session.uncertain,
+		CanLeave: leave.Disposition == behavior.LeaveAllow && !session.uncertain && session.service == nil && !session.draftFailed, CanNavigate: !snapshot.Dirty && !snapshot.Pending && snapshot.Outcome != behavior.SaveUnknown && !session.uncertain && !session.draftFailed,
 		Fields: snapshot.FieldErrors, Message: snapshot.Message}
 }
 
-func (runtime *Runtime) persist(ctx context.Context, session *runtimeSession) {
-	if session.editor == nil || runtime.options.Drafts == nil || session.draftKey == "" {
-		return
+func (runtime *Runtime) persist(ctx context.Context, session *runtimeSession) (failure *ActionError) {
+	defer func() { session.draftFailed = failure != nil }()
+	if session.editor == nil || runtime.options.Drafts == nil || session.draftKey == "" && session.nextDraftKey == "" {
+		return nil
 	}
 	runtime.draftWrites.Lock()
 	defer runtime.draftWrites.Unlock()
-	if runtime.draftOwners[session.draftKey] != session.editor.Snapshot().InstanceID {
-		session.draftStored = false
-		return
-	}
 	snapshot := session.editor.Snapshot()
-	if !snapshot.Dirty && !snapshot.Pending && snapshot.Outcome != behavior.SaveUnknown {
-		runtime.clearDraftLocked(ctx, session)
-		return
+	if session.draftKey != "" && runtime.draftOwners[session.draftKey] != snapshot.InstanceID {
+		session.draftStored = false
+		return commandFailure("superseded", "This draft was opened in a newer screen. Reopen this editor before making further changes.")
+	}
+	if session.nextDraftKey != "" {
+		if owner := runtime.draftOwners[session.nextDraftKey]; owner != "" && owner != snapshot.InstanceID {
+			session.draftStored = false
+			return commandFailure("superseded", "The saved draft belongs to a newer screen. Reopen this editor before making further changes.")
+		}
+		if err := runtime.options.Drafts.Put(ctx, session.nextDraftKey, snapshot); err != nil {
+			session.draftStored = false
+			return draftFailure()
+		}
+		runtime.draftOwners[session.nextDraftKey] = snapshot.InstanceID
+		if failure := runtime.clearDraftLocked(ctx, session); failure != nil {
+			return failure
+		}
+		delete(runtime.draftOwners, session.draftKey)
+		session.draftKey, session.nextDraftKey = session.nextDraftKey, ""
+		revision := snapshot.DraftRevision()
+		session.draft, session.draftStored = &revision, true
+	}
+	clean := !snapshot.Dirty && !snapshot.Pending && snapshot.Outcome != behavior.SaveUnknown
+	if clean && session.draft == nil {
+		return nil
 	}
 	if err := runtime.options.Drafts.Put(ctx, session.draftKey, snapshot); err != nil {
+		if session.draft == nil {
+			revision := snapshot.DraftRevision()
+			session.draft = &revision
+		}
 		session.draftStored = false
-		return
+		return draftFailure()
 	}
 	revision := snapshot.DraftRevision()
 	session.draft, session.draftStored = &revision, true
+	if clean {
+		return runtime.clearDraftLocked(ctx, session)
+	}
+	return nil
 }
 
-func (runtime *Runtime) clearDraft(ctx context.Context, session *runtimeSession) {
+func (runtime *Runtime) clearDraft(ctx context.Context, session *runtimeSession) *ActionError {
 	runtime.draftWrites.Lock()
 	defer runtime.draftWrites.Unlock()
-	runtime.clearDraftLocked(ctx, session)
+	failure := runtime.clearDraftLocked(ctx, session)
+	session.draftFailed = failure != nil
+	return failure
 }
 
-func (runtime *Runtime) clearDraftLocked(ctx context.Context, session *runtimeSession) {
-	if runtime.options.Drafts != nil && session.editor != nil && runtime.draftOwners[session.draftKey] != session.editor.Snapshot().InstanceID {
-		return
+func (runtime *Runtime) clearDraftLocked(ctx context.Context, session *runtimeSession) *ActionError {
+	if runtime.options.Drafts != nil && session.editor != nil && session.draftKey != "" && runtime.draftOwners[session.draftKey] != session.editor.Snapshot().InstanceID {
+		return commandFailure("superseded", "This draft was opened in a newer screen. Reopen this editor before making further changes.")
 	}
 	if runtime.options.Drafts != nil && session.draft != nil {
-		_, err := runtime.options.Drafts.ClearIfRevision(ctx, session.draftKey, *session.draft)
-		session.draftStored = err == nil
-		if err == nil {
-			session.draft = nil
+		cleared, err := runtime.options.Drafts.ClearIfRevision(ctx, session.draftKey, *session.draft)
+		if err == nil && !cleared {
+			_, found, loadErr := runtime.options.Drafts.Load(ctx, session.draftKey)
+			if loadErr != nil || found {
+				err = behavior.ErrDraftConflict
+			}
 		}
+		if err != nil {
+			session.draftStored = false
+			return draftFailure()
+		}
+		session.draft, session.draftStored = nil, true
 	}
+	return nil
+}
+
+func draftFailure() *ActionError {
+	return commandFailure("draft", "Your local draft could not be safely stored or cleared. Your text is still here; retry after local storage is available.")
 }
 
 func (runtime *Runtime) ownsDraft(session *runtimeSession) bool {
@@ -600,7 +655,13 @@ func (runtime *Runtime) ownsDraft(session *runtimeSession) bool {
 	}
 	runtime.draftWrites.Lock()
 	defer runtime.draftWrites.Unlock()
-	return runtime.draftOwners[session.draftKey] == session.editor.Snapshot().InstanceID
+	instance := session.editor.Snapshot().InstanceID
+	if session.nextDraftKey != "" {
+		if owner := runtime.draftOwners[session.nextDraftKey]; owner != "" && owner != instance {
+			return false
+		}
+	}
+	return runtime.draftOwners[session.draftKey] == instance
 }
 
 func (runtime *Runtime) releaseDraft(session *runtimeSession) {
@@ -609,8 +670,10 @@ func (runtime *Runtime) releaseDraft(session *runtimeSession) {
 	}
 	runtime.draftWrites.Lock()
 	defer runtime.draftWrites.Unlock()
-	if runtime.draftOwners[session.draftKey] == session.editor.Snapshot().InstanceID {
-		delete(runtime.draftOwners, session.draftKey)
+	for _, key := range []string{session.draftKey, session.nextDraftKey} {
+		if runtime.draftOwners[key] == session.editor.Snapshot().InstanceID {
+			delete(runtime.draftOwners, key)
+		}
 	}
 }
 

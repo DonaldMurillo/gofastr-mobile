@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DonaldMurillo/gofastr-mobile/behavior"
+	"github.com/DonaldMurillo/gofastr-native/behavior"
 )
 
 func liveFixture(t *testing.T, watch Watch, allowed *atomic.Bool, editor bool) (*Runtime, Command) {

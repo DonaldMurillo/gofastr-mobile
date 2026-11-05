@@ -59,6 +59,104 @@ test('connected but hidden retained lists do not watch until visible again', asy
   fixture.live.close();
 });
 
+for (const code of ['stale', 'expired']) {
+  test(`a retained ${code} watch reopens its read without asking for an action retry`, async () => {
+    let watches = 0, refreshes = 0;
+    const fixture = controller({
+      watch: async () => ++watches === 1 ? { error: { code, message: 'Reopen the retained screen' } } : {},
+      refresh: async optionsSignal => { assert.equal(optionsSignal.aborted, false); refreshes++; return 'epoch:2'; },
+    });
+    await flush(); fixture.tick(50); await flush();
+    assert.equal(refreshes, 1);
+    assert.equal(fixture.root.dataset.gfwLiveState, 'idle');
+    fixture.tick(50); await flush();
+    assert.deepEqual(fixture.calls, ['epoch:1', 'epoch:2']);
+    assert.equal(fixture.root.querySelector('[data-gfw-live-retry]').hidden, true);
+    fixture.live.close();
+  });
+}
+
+test('retained-read recovery is bounded until an explicit retry or successful watch', async () => {
+  let refreshes = 0;
+  const fixture = controller({ watch: async () => ({ error: { code: 'stale', message: 'Still retired' } }),
+    refresh: async () => { refreshes++; return 'epoch:2'; } });
+  await flush(); fixture.tick(50); await flush(); fixture.tick(50); await flush();
+  assert.equal(refreshes, 1);
+  assert.equal(fixture.root.dataset.gfwLiveState, 'error');
+  fixture.tick(500); await flush();
+  assert.equal(refreshes, 1);
+  fixture.root.querySelector('[data-gfw-live-retry]').click(); await flush();
+  assert.equal(refreshes, 2);
+  fixture.tick(50); await flush();
+  assert.equal(refreshes, 3);
+  fixture.live.close();
+});
+
+test('authorization and unknown-outcome errors never trigger automatic read recovery', async () => {
+  for (const code of ['forbidden', 'unknown', 'internal', 'invalid_request']) {
+    let refreshes = 0;
+    const fixture = controller({ watch: async () => ({ error: { code, message: 'Explicit failure' } }),
+      refresh: async () => { refreshes++; return 'epoch:2'; } });
+    await flush(); fixture.tick(50); await flush();
+    assert.equal(refreshes, 0, code);
+    assert.equal(fixture.root.dataset.gfwLiveState, 'error', code);
+    fixture.live.close();
+  }
+});
+
+test('transient watch cancellation and capacity errors retry reads only with a bounded budget', async () => {
+  for (const code of ['pending', 'cancelled']) {
+    let refreshes = 0;
+    const fixture = controller({ watch: async () => ({ error: { code, message: 'Prior read is stopping' } }),
+      refresh: async () => { refreshes++; return 'epoch:2'; } });
+    await flush(); fixture.tick(50); await flush();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      assert.equal(fixture.root.dataset.gfwLiveState, 'idle');
+      assert.equal(fixture.tick(150), true);
+      await flush();
+    }
+    assert.equal(fixture.calls.length, 4);
+    assert.equal(fixture.root.dataset.gfwLiveState, 'error');
+    fixture.tick(150); await flush();
+    assert.equal(fixture.calls.length, 4);
+    assert.equal(refreshes, 0);
+    fixture.live.close();
+  }
+});
+
+test('a watch succeeds after the preceding cancellation settles without reopening its screen', async () => {
+  let attempts = 0;
+  const fixture = controller({ watch: async () => ++attempts === 1 ? { error: { code: 'pending', message: 'Stopping' } } : {} });
+  await flush(); fixture.tick(50); await flush(); fixture.tick(150); await flush();
+  assert.equal(attempts, 2);
+  assert.equal(fixture.root.dataset.gfwLiveState, 'idle');
+  fixture.live.close();
+});
+
+test('failed reauthorization stays visible and a suspended recovery cannot commit late', async () => {
+  let refreshes = 0;
+  const denied = controller({ watch: async () => ({ error: { code: 'expired', message: 'Reopen' } }),
+    refresh: async () => { refreshes++; throw new Error('No longer authorized'); } });
+  await flush(); denied.tick(50); await flush(); denied.tick(500); await flush();
+  assert.equal(refreshes, 1);
+  assert.equal(denied.root.dataset.gfwLiveState, 'error');
+  assert.equal(denied.root.querySelector('[data-gfw-live-status]').textContent, 'No longer authorized');
+  denied.live.close();
+
+  let resolve, disposed = 0, committed = 0;
+  const hidden = controller({ watch: async () => ({ error: { code: 'stale', message: 'Retired' } }),
+    refresh: () => new Promise(value => { resolve = value; }) });
+  await flush(); hidden.tick(50); await flush();
+  assert.equal(hidden.root.dataset.gfwLiveState, 'loading');
+  hidden.live.suspend();
+  resolve(Object.assign(() => { committed++; return 'epoch:2'; }, { dispose() { disposed++; } }));
+  await flush();
+  assert.equal(committed, 0);
+  assert.equal(disposed, 1);
+  assert.equal(hidden.root.dataset.gfwLiveState, 'idle');
+  hidden.live.close();
+});
+
 test('a staged obsolete read disposes its unused screen and a hidden root aborts its watch', async () => {
   let disposed = 0, resolve;
   const fixture = controller({ refresh: () => new Promise(value => { resolve = value; }), watch: () => new Promise(() => {}) });

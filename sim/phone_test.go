@@ -33,9 +33,9 @@ import (
 
 	"github.com/DonaldMurillo/gofastr/framework/owner"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
-	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp"
+	"github.com/DonaldMurillo/gofastr-native/mobilehost"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
 )
 
 const origin = mobilehost.DefaultOrigin

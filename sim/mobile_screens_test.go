@@ -20,9 +20,9 @@ import (
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 	"github.com/DonaldMurillo/gofastr/framework/owner"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
-	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp"
+	"github.com/DonaldMurillo/gofastr-native/mobilehost"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
 )
 
 func TestSharedMobileScreensWebView(t *testing.T) {
@@ -69,7 +69,7 @@ func runSharedMobileScreens(t *testing.T, platform mobileui.Platform) {
 		chromedp.Evaluate(`window.__sharedScreenMarker = 'same-document'`, nil),
 		clickMobileAction("New note"),
 		chromedp.WaitVisible(`input[name="title"]`, chromedp.ByQuery),
-		waitForPath("/notes/new", 10*time.Second),
+		waitForFileScreen("/notes/new"),
 		setMobileField(`input[name="title"]`, "   "),
 		setMobileField(`textarea[name="body"]`, "An unsaved thought <not markup>."),
 		clickMobileAction("Done"),
@@ -94,11 +94,14 @@ func runSharedMobileScreens(t *testing.T, platform mobileui.Platform) {
 		chromedp.Poll(`document.activeElement === document.querySelector('textarea[name="body"]') && document.activeElement.selectionStart === 5 && document.activeElement.value === 'Newer edits during save.'`, nil),
 		chromedp.Location(&createdRoute),
 		clickMobileAction("Done"),
-		waitForPath("/notes", 10*time.Second),
+		waitForFileScreen("/notes"),
 		chromedp.Poll(`document.body.innerText.includes('One definition, two renderers')`, nil),
 		chromedp.Evaluate(`window.__sharedScreenMarker || 'lost'`, &savedMarker),
 		shot("list-light"),
 		chromedp.Click(`a[href^="/notes/"]:not([href="/notes/new"])`, chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return waitForFileScreen(strings.TrimPrefix(createdRoute, origin)).Do(ctx)
+		}),
 		chromedp.WaitVisible(`input[name="title"]`, chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('textarea[name="body"]').value === 'Newer edits during save.'`, nil),
 		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}),
@@ -112,14 +115,20 @@ func runSharedMobileScreens(t *testing.T, platform mobileui.Platform) {
 		clickMobileAction("Notes"),
 		chromedp.WaitVisible(`dialog[open] [data-cui-confirm-part="accept-danger"]`, chromedp.ByQuery),
 		chromedp.Click(`dialog[open] [data-cui-confirm-part="accept-danger"]`, chromedp.ByQuery),
-		waitForPath("/notes", 10*time.Second),
+		waitForFileScreen("/notes"),
 		chromedp.WaitVisible(`a[href^="/notes/"]:not([href="/notes/new"])`, chromedp.ByQuery),
 		chromedp.Click(`a[href^="/notes/"]:not([href="/notes/new"])`, chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return waitForFileScreen(strings.TrimPrefix(createdRoute, origin)).Do(ctx)
+		}),
 		chromedp.WaitVisible(`input[name="title"]`, chromedp.ByQuery),
 		chromedp.Poll(`document.querySelector('textarea[name="body"]').value === 'Unsaved text to share' && document.body.innerText.includes('draft restored')`, nil),
 		chromedp.Poll(`JSON.parse(document.querySelector('[data-gfw-screen]').dataset.gfwEditor || '{}').draftStored === true`, nil),
 		chromedp.Evaluate(`sessionStorage.clear()`, nil),
 		chromedp.Reload(),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return waitForFileScreen(strings.TrimPrefix(createdRoute, origin)).Do(ctx)
+		}),
 		chromedp.Poll(`document.querySelector('textarea[name="body"]')?.value === 'Unsaved text to share' && document.body.innerText.includes('draft restored')`, nil),
 		clickMobileAction("Discard Changes"),
 		chromedp.Poll(`document.querySelector('textarea[name="body"]').value === 'Newer edits during save.'`, nil),
@@ -130,7 +139,7 @@ func runSharedMobileScreens(t *testing.T, platform mobileui.Platform) {
 		emulation.SetDeviceMetricsOverride(390, 844, 3, true),
 		chromedp.Evaluate(`document.documentElement.style.fontSize = ''`, nil),
 		clickMobileAction("Done"),
-		waitForPath("/notes", 10*time.Second),
+		waitForFileScreen("/notes"),
 		setMobileField(`input[type="search"]`, "does-not-match"),
 		chromedp.Evaluate(`document.querySelector('input[type="search"]').form.requestSubmit()`, nil),
 		chromedp.Poll(`document.body.innerText.includes('No matching notes')`, nil),
@@ -140,7 +149,8 @@ func runSharedMobileScreens(t *testing.T, platform mobileui.Platform) {
 		clickMobileAction("About Notes"),
 		chromedp.Poll(`document.body.innerText.includes('Your choice of renderer.')`, nil),
 		clickMobileAction("Done"),
-		waitForPath("/notes", 10*time.Second),
+		waitForComponentPath("/notes"),
+		chromedp.Poll(`!!document.querySelector('[data-gfw-screen]').dataset.gfwInstance`, nil),
 		chromedp.WaitVisible(`input[type="search"]`, chromedp.ByQuery),
 		chromedp.Evaluate(`document.documentElement.scrollWidth <= innerWidth`, &layoutFits),
 		shot("list-dark"),

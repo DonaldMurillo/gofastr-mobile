@@ -168,3 +168,25 @@ notification, share-provider, physical device, VoiceOver or IME acceptance.
 The parent owns real-browser E2E and the hosted bootstrap. Native Android,
 background recording, speech recognition, remote sync and durable background
 work are deferred/not implemented here.
+
+Retained live collections now use [bounded session recovery](../../../docs/mobile-reliability.md)
+for stale/expired watch instances. The real-bridge regression is
+`sim/reliability_test.go`; automatic reopen never replays a write, and failed
+reauthorization or repeated retirement still exposes the read error.
+
+Transient `pending`/`cancelled` watch replies get at most three 150ms read-only
+retries before Retry is shown. Success or explicit reactivation resets the
+budget; actions and device outcomes are never retried by this policy.
+
+`lifecycle.js` composes with GoFastr's pre-navigation history hook, not a parallel
+router. App-tagged Back/Forward awaits Go leave/Keep and validates the current
+revision before replay; tags survive reload. Cancel/failed acknowledgement keep
+the editor. Untagged history fails closed by restoring the current URL with
+`replaceState`; use in-app navigation instead. Hidden/pagehide events initiate
+best-effort Go checkpoints without Save or committing local IME. See the
+[shared reliability contract](../../../docs/mobile-reliability.md).
+Checkpoint sequence/mutation fences reject late same-revision snapshots, while
+completion/leave/discard hold background snapshots until buffers are settled.
+Typing checkpoints do not wait behind long mutations. Completion mismatch is
+bounded to two read-only observations and then fails uncertain, never a retry
+of the original action.

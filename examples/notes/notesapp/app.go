@@ -7,11 +7,11 @@ import (
 
 	"github.com/DonaldMurillo/gofastr/framework"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp/application"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesweb"
-	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp/application"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesweb"
+	"github.com/DonaldMurillo/gofastr-native/mobilehost"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
 )
 
 // Build assembles the iOS presentation for compatibility with existing callers.

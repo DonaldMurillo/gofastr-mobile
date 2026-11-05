@@ -14,8 +14,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 	appui "github.com/DonaldMurillo/gofastr/core-ui/app"
 	"github.com/DonaldMurillo/gofastr/core-ui/component"
 	"github.com/DonaldMurillo/gofastr/core-ui/registry"
@@ -57,17 +57,21 @@ var servicesAdapter string
 //go:embed live.js
 var liveAdapter string
 
+//go:embed lifecycle.js
+var lifecycleAdapter string
+
 var rendererStyle = registry.RegisterStyle("gfm-webview", func(style.Theme) string { return stylesheet })
 var rendererForeground = registry.RegisterBehavior("gfm-webview-foreground", foregroundAdapter, registry.Markers("[data-gfw-screen]"))
 var rendererServices = registry.RegisterBehavior("gfm-webview-services", servicesAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires("gfm-webview-foreground"))
 var rendererLive = registry.RegisterBehavior("gfm-webview-live", liveAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires("gfm-webview-components"))
+var rendererLifecycle = registry.RegisterBehavior("gfm-webview-lifecycle", lifecycleAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires(headless.LeaveGuardBehaviorName))
 var rendererComponents = registry.RegisterBehavior("gfm-webview-components", componentsAdapter, registry.Markers("[data-gfw-screen]"))
 var rendererPhotos = registry.RegisterBehavior("gfm-webview-photos", photosAdapter, registry.Markers("[data-gfw-screen]"))
 var rendererFiles = registry.RegisterBehavior("gfm-webview-files", filesAdapter, registry.Markers("[data-gfw-screen]"),
 	registry.Requires("gfm-webview-photos", "gfm-webview-foreground"))
 var rendererPresentation = registry.RegisterBehavior("gfm-webview-presentation", presentationAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires("gfm-webview-foreground"))
 var rendererBehavior = registry.RegisterBehavior("gfm-webview", behavior, registry.Markers("[data-gfw-screen]"),
-	registry.Requires(headless.LeaveGuardBehaviorName, "gfm-webview-presentation", "gfm-webview-files", "gfm-webview-components", "gfm-webview-services", "gfm-webview-live"),
+	registry.Requires(headless.LeaveGuardBehaviorName, "gfm-webview-presentation", "gfm-webview-files", "gfm-webview-components", "gfm-webview-services", "gfm-webview-live", "gfm-webview-lifecycle"),
 	registry.Interactions(registry.Interaction{Event: "click", Selector: "[data-gfw-screen] [form=\"gfw-form\"]"}))
 
 // Renderer adapts an immutable registry to the existing GoFastr web host.

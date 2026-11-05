@@ -69,6 +69,7 @@
 [data-gfw-screen] .gfw-row::before { content: attr(data-gfw-swipe-label); position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 1rem; border-radius: inherit; color: var(--color-primary); background: var(--color-surface); }
 [data-gfw-screen] .gfw-row-content { position: relative; display: flex; align-items: center; gap: .5rem; padding-inline: .75rem; background: var(--color-surface); transition: transform .18s ease-out; }
 [data-gfw-screen] .gfw-swiping .gfw-row-content { transition: none; }
+[data-gfw-screen] .gfw-row:has(.gfw-row-menu[open]) .gfw-row-content { transition: none; }
 [data-gfw-screen] .gfw-swiping { overflow: hidden; }
 [data-gfw-screen] .gfw-row .gfm-row { flex: 1; min-width: 0; }
 [data-gfw-screen] .gfm-list > .gfw-row:first-child .gfw-row-content { border-start-start-radius: var(--gfm-radius); border-start-end-radius: var(--gfm-radius); }

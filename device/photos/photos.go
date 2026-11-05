@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
 )
 
 // Source identifies a user-initiated photo acquisition service, not a permission.

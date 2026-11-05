@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/audio"
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/device/notifications"
-	"github.com/DonaldMurillo/gofastr-mobile/device/sharing"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/device/audio"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/notifications"
+	"github.com/DonaldMurillo/gofastr-native/device/sharing"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func TestServicesSwiftWireBoundsAndOneShotLifecycle(t *testing.T) {
@@ -130,6 +130,7 @@ func TestServiceRunnerAndVisibleLiveContracts(t *testing.T) {
 			`"live/v1": "available"`, "GofastrServiceRunner.capabilities()", "liveVisible", "screen.form == nil, let list = screen.list", "watchGeneration.accepts(token)",
 			`"kind": "watch"`, `"values": query, "dataVersion": version`, "self.instance == instance", "self.selection.reconcile(model.list?.rows ?? [])",
 			"restoreListScroll(anchor)", "private func cancelListRead()", "private func cancelWatch()", "operation.cancel()", "watchWorkers", `"native.list.retry"`, `"native.list.cancel"`,
+			"liveReadRecovery.recover(error.code)", "self.reloadList()", "liveReadRecovery.reset()",
 		},
 		"GofastrForeground.swift":  {"final class MobileServiceTask: MobileForegroundTask", "runner.perform(requestJSON: json)", "runner.cancel()", "focus.restore(source)"},
 		"GofastrAttachments.swift": {"let audio: MobileAudioDocument?", "MobileAudioPreview(audio, identifier: file.id)", "players.forEach { $0.stop() }"},
@@ -312,6 +313,27 @@ enum ServiceChecks {
         precondition(!read.accepts(old))
         let fresh = read.begin()
         precondition(read.accepts(fresh) && !read.accepts(old))
+        var recovery = MobileReadRecovery()
+        for code in ["forbidden", "unknown", "internal", "invalid_request", "pending", "cancelled"] {
+            precondition(!recovery.recover(code), "Only obsolete read sessions can recover automatically")
+        }
+        precondition(recovery.recover("stale"))
+        for code in ["pending", "cancelled"] {
+            recovery.reset()
+            precondition(recovery.retry(code))
+            precondition(recovery.retry(code))
+            precondition(recovery.retry(code))
+            precondition(!recovery.retry(code), "Transient watch retries must be bounded")
+        }
+        precondition(!recovery.retry("forbidden"))
+        recovery.reset()
+        precondition(recovery.recover("stale"))
+        precondition(!recovery.recover("expired"), "Recovery must not loop without a successful watch or explicit retry")
+        recovery.reset()
+        precondition(recovery.recover("expired"))
+        precondition(!recovery.recover("stale"))
+        recovery.reset()
+        precondition(recovery.recover("stale"))
         let list = try decoder.decode(MobileList.self, from: Data(#"{"rows":[{"id":"kept","title":"Kept","destination":"/notes/kept"}],"selection":{"key":"selected","selected":["kept","deleted"],"maximum":10}}"#.utf8))
         var selection = MobileListSelectionState(list.selection)
         selection.reconcile(list.rows)

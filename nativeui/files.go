@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/device/photos"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/photos"
 )
 
 // FileRequest asks a compiled renderer to acquire or export one bounded document.

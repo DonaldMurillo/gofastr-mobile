@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func TestFilesThroughNativeBinding(t *testing.T) {

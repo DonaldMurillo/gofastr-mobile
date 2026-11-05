@@ -101,6 +101,12 @@ func usePublicServiceRunner(_ presenter: UIViewController, route: @escaping (Str
     runner.perform(requestJSON: request, completion: completion)
     runner.cancel()
 }
+func usePublicRendererLifecycle(_ renderer: GofastrNativeRenderer, completion: @escaping (Bool) -> Void) {
+    renderer.checkpoint()
+    renderer.checkpoint(completion: completion)
+    renderer.suspend()
+    renderer.resume()
+}
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +135,7 @@ func TestComponentsUIKitContracts(t *testing.T) {
 		"GofastrNavigation.swift": {
 			`UITabBarController`, `UINavigationController(rootViewController: placeholder)`, `"native.tab.\(tab.id)"`,
 			`screen.prepareForNavigation`, `openRestorationRoute`, `self.host.open(route, completion: completion)`, `self.navigations[index].tabBarItem.isEnabled = false`,
-			`MobileNavigationMetadata.maximumDepth`, `MobileNavigationMetadata.maximumTabs`, `hasUncertainEditor`, `draftKey == key`, `view.isUserInteractionEnabled = false`,
+			`MobileNavigationMetadata.maximumDepth`, `MobileNavigationMetadata.maximumTabs`, `hasUncertainEditor`, `MobileRestorationSafety.canOpen`, `view.isUserInteractionEnabled = false`,
 			`"compose": "square.and.pencil"`, `"share": "square.and.arrow.up"`, `UIImage(systemName: "square.grid.2x2")`,
 		},
 	}

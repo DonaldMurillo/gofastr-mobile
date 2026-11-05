@@ -17,9 +17,9 @@ import (
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 	"github.com/DonaldMurillo/gofastr/framework/owner"
 
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
 )
 
 func TestMobileComponentsWebView(t *testing.T) {
@@ -63,17 +63,26 @@ func runMobileComponents(t *testing.T, platform mobileui.Platform) {
 		t.Logf("component stage %d", stage)
 		stageContext, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		if err := chromedp.Run(stageContext, actions...); err != nil {
+		actionIndex := 0
+		steps := make([]chromedp.Action, len(actions))
+		for index, action := range actions {
+			steps[index] = chromedp.ActionFunc(func(ctx context.Context) error {
+				actionIndex = index + 1
+				return action.Do(ctx)
+			})
+		}
+		if err := chromedp.Run(stageContext, steps...); err != nil {
 			var body, location string
-			var renderedState any
+			var renderedState string
 			var failurePixels []byte
-			_ = chromedp.Run(ctx, chromedp.Text("body", &body, chromedp.ByQuery), chromedp.Location(&location), chromedp.CaptureScreenshot(&failurePixels), chromedp.Evaluate(`({config: JSON.parse(document.querySelector('[data-gfw-config]').dataset.gfwConfig).route, body: document.querySelector('textarea[name="body"]')?.value})`, &renderedState))
+			_ = chromedp.Run(ctx, chromedp.Text("body", &body, chromedp.ByQuery), chromedp.Location(&location), chromedp.CaptureScreenshot(&failurePixels), chromedp.Evaluate(`JSON.stringify({config: JSON.parse(document.querySelector('[data-gfw-config]').dataset.gfwConfig).route, body: document.querySelector('textarea[name="body"]')?.value, interactions: window.__collectionInteractions})`, &renderedState))
 			_ = os.WriteFile(filepath.Join(shotsDir(t), string(platform)+"-components-failure.png"), failurePixels, 0o600)
-			t.Fatalf("%s component stage %d: %v\n%s\nstate: %v\n%s", platform, stage, err, location, renderedState, body)
+			t.Fatalf("%s component stage %d action %d: %v\n%s\nstate: %v\n%s", platform, stage, actionIndex, err, location, renderedState, body)
 		}
 	}
 	check(chromedp.Navigate(origin+"/notes"),
 		chromedp.WaitVisible(`[data-gfw-tab="notes"]`, chromedp.ByQuery),
+		traceComponentInteractions(),
 		chromedp.Click(`[data-gfw-filters] > summary`, chromedp.ByQuery),
 		chromedp.WaitVisible(`[data-gfw-filter="view"]`, chromedp.ByQuery),
 		chromedp.WaitVisible(`[data-gfw-screen][data-gfw-instance]`, chromedp.ByQuery),
@@ -134,6 +143,26 @@ func runMobileComponents(t *testing.T, platform mobileui.Platform) {
 	}
 }
 
+func traceComponentInteractions() chromedp.Action {
+	return chromedp.Evaluate(`(() => {
+		window.__collectionInteractions = [];
+		for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'click', 'submit']) {
+			document.addEventListener(type, event => {
+				const root = document.querySelector('[data-gfw-screen]');
+				const target = event.submitter || event.target;
+				window.__collectionInteractions.push({type, time: Math.round(performance.now()),
+					target: target.tagName, text: target.textContent?.trim().slice(0, 50),
+					row: target.closest('[data-gfw-row]')?.dataset.gfwRow,
+					action: target.dataset?.gfwRowAction, x: event.clientX, y: event.clientY,
+					scroll: scrollY, busy: root?.querySelector('#gfw-form')?.getAttribute('aria-busy'),
+					live: root?.dataset.gfwLiveState, instance: root?.dataset.gfwInstance,
+					menus: Array.from(document.querySelectorAll('[data-gfw-row-menu][open]')).map(menu => menu.dataset.gfwRowMenu)});
+				if (window.__collectionInteractions.length > 80) window.__collectionInteractions.shift();
+			}, true);
+		}
+	})()`, nil)
+}
+
 func runCollectionInteractions(t *testing.T, service *notes.Service, userContext context.Context, check func(...chromedp.Action)) {
 	t.Helper()
 	var selected []string
@@ -181,6 +210,10 @@ func runCollectionInteractions(t *testing.T, service *notes.Service, userContext
 		chromedp.Poll(fmt.Sprintf(`!document.querySelector(%s)?.textContent.includes('Pinned')`, mustJSON(rowSelector)), nil))
 	check(componentTouchSwipe(rowSelector, "left"),
 		chromedp.Poll(fmt.Sprintf(`!!document.querySelector(%s)?.querySelector('details[open]')`, mustJSON(rowSelector)), nil),
+		chromedp.Evaluate(fmt.Sprintf(`(() => {
+			const content = document.querySelector(%s).querySelector('.gfw-row-content');
+			if (getComputedStyle(content).transform !== 'none') throw new Error('Open row actions must not move while accepting taps');
+		})()`, mustJSON(rowSelector)), nil),
 		chromedp.Click(rowSelector+` summary`, chromedp.ByQuery))
 	check(componentTouchSwipe(rowSelector, "up"),
 		chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, nil, func(parameters *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {

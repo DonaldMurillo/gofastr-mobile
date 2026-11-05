@@ -6,7 +6,7 @@ import (
 	"image/jpeg"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
 )
 
 func TestRequestChecksRealBoundedJPEG(t *testing.T) {

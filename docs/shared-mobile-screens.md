@@ -124,11 +124,11 @@ do not live in a template. Apps write neither file.
 ## Run and verify
 
 ```sh
-go run ./cmd/gofastr-mobile run --platform ios-sim --renderer native \
+go run ./cmd/gofastr-native run --platform ios-sim --renderer native \
   --pkg ./examples/notes/notesnative --id dev.gofastr.notesnative \
   --name 'Native Notes' --out dist/mobile/ios-native
 
-go run ./cmd/gofastr-mobile run --platform ios-sim --renderer webview \
+go run ./cmd/gofastr-native run --platform ios-sim --renderer webview \
   --pkg ./examples/notes/notesmobile --id dev.gofastr.notesshared \
   --name 'Shared Notes' --out dist/mobile/ios-shared-webview
 

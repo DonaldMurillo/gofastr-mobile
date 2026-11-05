@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/audio"
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/device/sharing"
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
-	"github.com/DonaldMurillo/gofastr-mobile/render/webview"
+	"github.com/DonaldMurillo/gofastr-native/device/audio"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/device/sharing"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/render/webview"
 	"github.com/DonaldMurillo/gofastr/core/router"
 )
 

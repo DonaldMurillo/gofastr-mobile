@@ -135,6 +135,8 @@ final class MobileHost {
     var navigationChanged: (() -> Void)?
     var openServiceRoute: ((String) -> Bool)?
     var mutationRevision = 0
+    var active = true
+    private let commandSequencer = MobileCommandSequencer()
     private let workers: OperationQueue = {
         let workers = OperationQueue()
         workers.maxConcurrentOperationCount = 4
@@ -211,6 +213,7 @@ final class MobileHost {
             }
             DispatchQueue.main.async { completion(result) }
         }
+        commandSequencer.prepare(operation, kind: fields["kind"] as? String ?? "", instance: fields["instance"] as? String)
         (fields["kind"] as? String == "watch" ? watchWorkers : workers).addOperation(operation)
         return operation
     }
@@ -244,6 +247,8 @@ public final class GofastrNativeRenderer {
     private var stopped = false
     private var queuedRoutes: [(route: String, draftKey: String?)] = []
     private var lifecycleObservers: [NSObjectProtocol] = []
+    private var checkpointBatches: [UUID: MobileCheckpointBatch] = [:]
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
     public init(backend: GofastrNativeBackend) {
         host = MobileHost(backend)
@@ -303,9 +308,11 @@ public final class GofastrNativeRenderer {
             case .failure(let error): launch.showFailure(error)
             }
         }
-        for name in [UIApplication.willResignActiveNotification, UIApplication.willTerminateNotification] {
-            lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.checkpoint() })
+        for name in [UIApplication.willResignActiveNotification, UIApplication.didEnterBackgroundNotification] {
+            lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.suspend() })
         }
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.resume() })
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in self?.checkpoint() })
         return window
     }
 
@@ -339,11 +346,65 @@ public final class GofastrNativeRenderer {
     }
 
     public func checkpoint() {
-        guard Thread.isMainThread else { DispatchQueue.main.async { self.checkpoint() }; return }
-        if let tabs = window?.rootViewController as? MobileTabController { tabs.checkpoint() }
-        else if let navigation = window?.rootViewController as? UINavigationController {
-            navigation.viewControllers.forEach { ($0 as? NativeScreenController)?.checkpointForBackground() }
+        checkpoint { _ in }
+    }
+
+    public func checkpoint(completion: @escaping (Bool) -> Void) {
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.checkpoint(completion: completion) }; return }
+        guard !stopped else { completion(false); return }
+        (window?.rootViewController as? MobileTabController)?.persist()
+        let controllers = retainedScreens.filter { $0.isViewLoaded }
+        guard !controllers.isEmpty else { completion(true); return }
+        let identifier = UUID()
+        let batch = MobileCheckpointBatch(count: controllers.count) { [weak self] stored in
+            if let self {
+                self.checkpointBatches.removeValue(forKey: identifier)
+                if self.checkpointBatches.isEmpty { self.endBackgroundTask() }
+            }
+            completion(stored)
         }
+        checkpointBatches[identifier] = batch
+        if backgroundTask == .invalid {
+            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "GoFastr draft checkpoint") { [weak self] in
+                guard Thread.isMainThread else { DispatchQueue.main.async { self?.expireCheckpoints() }; return }
+                self?.expireCheckpoints()
+            }
+        }
+        controllers.forEach { $0.checkpointForBackground(completion: batch.complete) }
+        if backgroundTask == .invalid { batch.expire() }
+    }
+
+    public func suspend() {
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.suspend() }; return }
+        guard !stopped else { return }
+        host.active = false
+        retainedScreens.forEach { $0.suspendReads() }
+        checkpoint()
+    }
+
+    public func resume() {
+        guard Thread.isMainThread else { DispatchQueue.main.async { self.resume() }; return }
+        guard !stopped, UIApplication.shared.applicationState == .active else { return }
+        host.active = true
+        retainedScreens.forEach { $0.resumeVisibleReads() }
+    }
+
+    private var retainedScreens: [NativeScreenController] {
+        if let tabs = window?.rootViewController as? MobileTabController { return tabs.retainedScreens }
+        return (window?.rootViewController as? UINavigationController)?.viewControllers.compactMap { $0 as? NativeScreenController } ?? []
+    }
+
+    private func endBackgroundTask() {
+        let task = backgroundTask
+        backgroundTask = .invalid
+        if task != .invalid { UIApplication.shared.endBackgroundTask(task) }
+    }
+
+    private func expireCheckpoints() {
+        let batches = Array(checkpointBatches.values)
+        checkpointBatches.removeAll()
+        endBackgroundTask()
+        batches.forEach { $0.expire() }
     }
 
     private func finishStartup() {
@@ -385,6 +446,9 @@ public final class GofastrNativeRenderer {
     public func stop() {
         guard Thread.isMainThread else { DispatchQueue.main.async { self.stop() }; return }
         stopped = true
+        host.active = false
+        retainedScreens.forEach { $0.suspendReads() }
+        expireCheckpoints()
         host.foreground.cancel()
         queuedRoutes.removeAll()
         lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
@@ -394,7 +458,14 @@ public final class GofastrNativeRenderer {
         }
     }
 
-    deinit { lifecycleObservers.forEach(NotificationCenter.default.removeObserver) }
+    deinit {
+        lifecycleObservers.forEach(NotificationCenter.default.removeObserver)
+        let task = backgroundTask
+        if task != .invalid {
+            if Thread.isMainThread { UIApplication.shared.endBackgroundTask(task) }
+            else { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(task) } }
+        }
+    }
 }
 
 final class NativeScreenController: UIViewController, UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UITextFieldDelegate, UITextViewDelegate {
@@ -412,6 +483,8 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     private var editor: MobileEditor?
     private var bufferRevision = 0
     private var pendingCheckpoint: DispatchWorkItem?
+    private var checkpointFence = MobileCheckpointFence()
+    private var checkpointDeferral = MobileCheckpointDeferral()
     private var observedEffects = Set<String>()
     private var observedServices = Set<String>()
     private let status = UILabel()
@@ -428,11 +501,11 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     private var liveVisible = false
     private var watchPaused = false
     private var watchGeneration = MobileReadGeneration()
+    private var liveReadRecovery = MobileReadRecovery()
     private var watchOperation: Operation?
     private var liveVersion: String?
     private var readMessage: String?
     private var readFailed = false
-    private var activityObservers: [NSObjectProtocol] = []
     private var filterHeader: UIStackView?
     private var loadMore: UIButton?
     private var actionValues: [String: String] = [:]
@@ -442,7 +515,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     var skipRefreshOnAppear = false
     var route: String { screen.route }
     var draftKey: String? { screen.form?.draft?.key }
-    var navigationBlocked: Bool { busy || operationUnconfirmed || host.foreground.isActive || editor?.pending == true || editor?.unknown == true }
+    var navigationBlocked: Bool { !host.active || busy || operationUnconfirmed || host.foreground.isActive || editor?.pending == true || editor?.unknown == true }
     var hasUncertainEditor: Bool { operationUnconfirmed || editor?.pending == true || editor?.unknown == true }
     var navigationStillSafe: Bool { !navigationBlocked && navigationPermit == bufferRevision }
     private var dirty: Bool { screen.form != nil && fieldValues != baseline }
@@ -452,6 +525,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         self.host = host
         instance = reply?.instance
         editor = reply?.editor
+        bufferRevision = reply?.revision ?? 0
         selection = MobileListSelectionState(screen.list?.selection)
         selectionMode = !selection.selected.isEmpty
         listQuery = screen.values ?? [:]
@@ -471,15 +545,11 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         else if let form = screen.form { buildForm(form) }
         else if let preview = screen.filePreview { buildFilePreview(preview) }
         else if let content = screen.text { buildText(content) }
-        activityObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.cancelWatch()
-            self?.attachmentList?.stop()
-        })
-        activityObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.startWatch() })
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        liveReadRecovery.reset()
         if appeared && screen.list != nil && (!skipRefreshOnAppear || listNeedsRefresh || renderedMutationRevision != host.mutationRevision) { refresh() }
         else if appeared { refreshImages() }
         skipRefreshOnAppear = false
@@ -514,12 +584,10 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         table?.refreshControl?.endRefreshing()
     }
 
-    deinit { activityObservers.forEach(NotificationCenter.default.removeObserver) }
-
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isMovingFromParent || navigationController?.isBeingDismissed == true || isBeingDismissed {
-            send("close") { _ in }
+            closeSession()
         }
     }
 
@@ -713,6 +781,12 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     @objc private func refresh() {
+        liveReadRecovery.reset()
+        reloadList()
+    }
+
+    private func reloadList() {
+        guard host.active, UIApplication.shared.applicationState == .active else { listNeedsRefresh = true; return }
         guard !busy, !host.foreground.isActive else { table?.refreshControl?.endRefreshing(); return }
         cancelWatch()
         watchPaused = false
@@ -823,7 +897,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func startWatch() {
-        guard liveVisible, UIApplication.shared.applicationState == .active, !watchPaused, !readFailed,
+        guard liveVisible, host.active, UIApplication.shared.applicationState == .active, !watchPaused, !readFailed,
               !busy, !listLoading, !hasUncertainEditor, !host.foreground.isActive, presentedViewController == nil,
               screen.form == nil, let list = screen.list, screen.live != nil,
               let instance, let version = liveVersion, !version.isEmpty, watchOperation == nil else { return }
@@ -840,7 +914,11 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
                 self.listReadFailed("Live updates are unavailable. Retry to refresh the current query.")
             case .success(let reply):
                 if let error = reply.error {
-                    if error.code == "cancelled" {
+                    if self.liveReadRecovery.recover(error.code) {
+                        self.reloadList()
+                        return
+                    }
+                    if self.liveReadRecovery.retry(error.code) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
                             guard let self, self.watchGeneration.accepts(token) else { return }
                             self.startWatch()
@@ -850,6 +928,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
                     self.listReadFailed(error.code == "stale" || error.code == "expired" ? "This list changed. Retry to load current items." : error.message)
                     return
                 }
+                self.liveReadRecovery.reset()
                 if reply.changed == true { self.refresh() }
                 else {
                     self.liveVersion = reply.dataVersion ?? version
@@ -1048,7 +1127,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? { swipeActions(indexPath, leading: false) }
 
     private func openDestination(_ destination: String) {
-        guard !busy, !host.foreground.isActive else { return }
+        guard !navigationBlocked else { return }
         guard editor?.pending != true, editor?.unknown != true else {
             status.text = "Finish the pending or unconfirmed save before opening an attachment. Your text is still here."
             return
@@ -1057,18 +1136,13 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
             pendingCheckpoint?.cancel()
             let current = bufferRevision
             setBusy(true)
-            send("checkpoint") { [weak self] result in
+            checkpointEditor { [weak self] stored in
                 guard let self else { return }
                 self.setBusy(false)
-                guard case .success(let reply) = result, reply.error == nil else {
-                    self.showFailure(MobileHost.failure(nil)); return
-                }
-                guard current == self.bufferRevision, reply.revision == current,
-                      let editor = reply.editor, !editor.pending, !editor.unknown, !editor.dirty || editor.draftStored else {
+                guard stored, current == self.bufferRevision, !self.navigationBlocked else {
                     self.status.text = "Save your changes before opening this attachment; the draft could not be safely preserved."
                     return
                 }
-                self.editor = editor
                 self.pushDestination(destination)
             }
             return
@@ -1088,42 +1162,83 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         pendingCheckpoint?.cancel()
         let current = bufferRevision
         setBusy(true)
-        send("checkpoint") { [weak self] result in
+        checkpointEditor { [weak self] stored in
             guard let self else { completion(false); return }
             self.setBusy(false)
-            guard case .success(let reply) = result, reply.error == nil, reply.revision == current,
-                  self.bufferRevision == current, let editor = reply.editor,
-                  !editor.pending, !editor.unknown, !editor.dirty || editor.draftStored else {
+            guard stored, self.bufferRevision == current, !self.navigationBlocked else {
                 self.status.text = "Save your changes before leaving; the draft could not be safely preserved."
                 completion(false)
                 return
             }
-            self.editor = editor
             self.navigationPermit = current
             completion(true)
         }
     }
 
     func closeSession() {
+        guard !hasUncertainEditor, !busy else { return }
         cancelWatch()
         attachmentList?.stop()
         pendingCheckpoint?.cancel()
         pendingSearch?.cancel()
         send("close") { _ in }
+        instance = nil
     }
 
     func setNavigationInFlight(_ value: Bool) { setBusy(value) }
 
-    func checkpointForBackground() {
-        guard isViewLoaded, screen.form != nil else { return }
+    func suspendReads() {
+        guard isViewLoaded else { return }
+        cancelWatch()
+        attachmentList?.stop()
+        pendingSearch?.cancel()
+        pendingSearch = nil
+        revision += 1
+        if listLoading { listNeedsRefresh = true }
+        listLoading = false
+        table?.refreshControl?.endRefreshing()
+    }
+
+    func resumeVisibleReads() {
+        guard isViewLoaded, liveVisible, view.window != nil, navigationController?.topViewController === self else { return }
+        liveReadRecovery.reset()
+        if screen.list != nil && !watchPaused && (listNeedsRefresh || renderedMutationRevision != host.mutationRevision) { refresh() }
+        else { startWatch() }
+    }
+
+    func checkpointForBackground(completion: @escaping (Bool) -> Void) {
+        guard isViewLoaded, screen.form != nil else { completion(true); return }
+        checkpointEditor(completion: completion)
+    }
+
+    private func checkpointEditor(completion: @escaping (Bool) -> Void) {
         pendingCheckpoint?.cancel()
-        if instance != nil {
+        pendingCheckpoint = nil
+        guard !checkpointDeferral.hold(completion) else { return }
+        if let instance {
+            let ticket = checkpointFence.begin(revision: bufferRevision)
             send("checkpoint") { [weak self] result in
-                guard let self, case .success(let reply) = result, reply.revision == self.bufferRevision else { return }
-                self.editor = reply.editor ?? self.editor
+                guard let self, self.instance == instance, case .success(let reply) = result, reply.error == nil,
+                      self.checkpointFence.accepts(ticket, revision: self.bufferRevision, replyRevision: reply.revision),
+                      let editor = reply.editor else { completion(false); return }
+                self.editor = editor
+                if !self.busy && self.dirty {
+                    self.status.text = editor.draftStored ? self.screen.form?.draft?.changed : "Draft recovery is unavailable. Save before leaving."
+                }
                 self.updateBack()
+                completion(!self.hasUncertainEditor && (!editor.dirty || editor.draftStored))
             }
-        } else if let draft = screen.form?.draft, dirty { UserDefaults.standard.set(fieldValues, forKey: draft.key) }
+        } else {
+            if let draft = screen.form?.draft, dirty { UserDefaults.standard.set(fieldValues, forKey: draft.key) }
+            completion(!dirty)
+        }
+    }
+
+    private func finishCheckpointDeferral(discarded: Bool = false) {
+        let callbacks = checkpointDeferral.finish()
+        guard !callbacks.isEmpty else { return }
+        if discarded { callbacks.forEach { $0(false) } }
+        else { checkpointEditor { stored in callbacks.forEach { $0(stored) } } }
     }
 
     private func pushDestination(_ destination: String) {
@@ -1451,14 +1566,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
             pendingCheckpoint?.cancel()
             let task = DispatchWorkItem { [weak self] in
                 guard let self else { return }
-                self.send("checkpoint") { [weak self] result in
-                    guard let self, case .success(let reply) = result, reply.revision == self.bufferRevision else { return }
-                    self.editor = reply.editor
-                    if !self.busy && self.dirty {
-                        self.status.text = reply.editor?.draftStored == true ? self.screen.form?.draft?.changed : "Draft recovery is unavailable. Save before leaving."
-                    }
-                    self.updateBack()
-                }
+                self.checkpointEditor { _ in }
             }
             pendingCheckpoint = task
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(250), execute: task)
@@ -1494,7 +1602,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     @objc private func close() {
-        guard !busy, !host.foreground.isActive, let draft = screen.form?.draft else { return }
+        guard !navigationBlocked, let draft = screen.form?.draft else { return }
         let alert = UIAlertController(title: draft.title, message: draft.message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: draft.keepEditing, style: .cancel))
         alert.addAction(UIAlertAction(title: draft.keepDraft, style: .default) { [weak self] _ in self?.leave("keep") })
@@ -1558,25 +1666,35 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
 
     private func send(_ kind: String, extra: [String: Any] = [:], completion: @escaping (Result<MobileReply, Error>) -> Void) {
         guard let instance else { return }
+        if kind != "checkpoint" { checkpointFence.invalidate() }
         var fields: [String: Any] = ["kind": kind, "instance": instance, "revision": bufferRevision, "values": values]
         fields.merge(extra) { _, new in new }
         host.command(fields, completion: completion)
     }
 
     private func leave(_ choice: String) {
-        guard !busy, !host.foreground.isActive else { return }
+        guard !navigationBlocked else { return }
         guard instance != nil else {
             if choice == "discard", let draft = screen.form?.draft { UserDefaults.standard.removeObject(forKey: draft.key) }
             navigationController?.popViewController(animated: true)
             return
         }
         bufferRevision += 1
+        let current = bufferRevision
+        setBusy(true)
+        checkpointDeferral.begin()
         send("leave", extra: ["choice": choice]) { [weak self] result in
             guard let self else { return }
-            guard case .success(let reply) = result, reply.error == nil, reply.editor?.canLeave == true else {
+            self.setBusy(false)
+            guard case .success(let reply) = result, reply.error == nil, reply.revision == current,
+                  current == self.bufferRevision, !self.navigationBlocked,
+                  let editor = reply.editor, !editor.pending, !editor.unknown, editor.canLeave else {
                 self.status.text = "The draft is not safe to leave yet. Wait for the save or checkpoint to finish."
+                self.finishCheckpointDeferral()
                 return
             }
+            self.editor = editor
+            self.finishCheckpointDeferral(discarded: true)
             self.navigationController?.popViewController(animated: true)
         }
     }
@@ -1644,18 +1762,28 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         }
     }
 
-    private func complete(_ request: String, foregroundID: String? = nil) {
+    private func complete(_ request: String, foregroundID: String? = nil, remainingReads: Int = 1) {
+        checkpointDeferral.begin()
         send("complete", extra: ["requestId": request]) { [weak self] result in
             guard let self else { return }
             guard case .success(let reply) = result else {
                 self.finishForeground(foregroundID) {
+                    defer { self.finishCheckpointDeferral() }
                     self.setBusy(false)
                     self.report(MobileFailure(code: "unknown", message: "The operation outcome is unconfirmed. It was not retried. Keep this draft and inspect saved items.", fields: nil))
                 }
                 return
             }
             if reply.error?.code == "stale" || (reply.error == nil && reply.revision != self.bufferRevision) {
-                self.complete(request, foregroundID: foregroundID)
+                guard remainingReads > 0 else {
+                    self.finishForeground(foregroundID) {
+                        defer { self.finishCheckpointDeferral() }
+                        self.setBusy(false)
+                        self.report(MobileFailure(code: "unknown", message: "The operation outcome could not be confirmed for this buffer. It was not retried. Keep this draft and inspect saved items.", fields: nil))
+                    }
+                    return
+                }
+                self.complete(request, foregroundID: foregroundID, remainingReads: remainingReads - 1)
                 return
             }
             self.editor = reply.editor
@@ -1663,6 +1791,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
             let chained = reply.response?.presentation != nil || reply.response?.files != nil || reply.response?.service != nil
             let restoreFocus = !chained && reply.response?.navigation == nil && reply.response?.share == nil
             self.finishForeground(foregroundID, restoreFocus: restoreFocus, preserveFocus: chained) {
+                defer { self.finishCheckpointDeferral() }
                 self.setBusy(false)
                 if !chained { self.actionValues = [:] }
                 if let error = reply.error { self.report(error, editor: reply.editor); return }

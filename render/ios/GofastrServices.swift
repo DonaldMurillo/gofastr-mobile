@@ -343,3 +343,22 @@ struct MobileReadGeneration {
     mutating func cancel() { generation += 1; active = false }
     func accepts(_ token: Int) -> Bool { active && token == generation }
 }
+
+struct MobileReadRecovery {
+    private var attempted = false
+    private var transientAttempts = 0
+
+    mutating func recover(_ code: String) -> Bool {
+        guard !attempted, ["stale", "expired"].contains(code) else { return false }
+        attempted = true
+        return true
+    }
+
+    mutating func retry(_ code: String) -> Bool {
+        guard ["pending", "cancelled"].contains(code), transientAttempts < 3 else { return false }
+        transientAttempts += 1
+        return true
+    }
+
+    mutating func reset() { attempted = false; transientAttempts = 0 }
+}

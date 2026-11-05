@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DonaldMurillo/gofastr-mobile/behavior"
+	"github.com/DonaldMurillo/gofastr-native/behavior"
 )
 
 func TestReplyAlwaysEncodesZeroRevisionAndEditorFlags(t *testing.T) {

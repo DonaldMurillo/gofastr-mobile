@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/DonaldMurillo/gofastr-mobile/device/files"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
 func noteMedia(ctx context.Context, store *files.Store, noteID string) ([]nativeui.Image, []nativeui.Attachment, error) {

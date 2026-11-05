@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/DonaldMurillo/gofastr-mobile/mobileui"
-	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
-	"github.com/DonaldMurillo/gofastr-mobile/render/webview"
+	"github.com/DonaldMurillo/gofastr-native/mobileui"
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
+	"github.com/DonaldMurillo/gofastr-native/render/webview"
 )
 
 func TestPresentationProtocolThroughRendererActionBoundary(t *testing.T) {

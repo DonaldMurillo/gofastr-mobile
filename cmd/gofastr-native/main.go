@@ -1,10 +1,10 @@
-// Command gofastr-mobile builds a GoFastr app into a phone app and runs it
+// Command gofastr-native builds a GoFastr app into a phone app and runs it
 // on the iOS simulator or an Android emulator, from the command line: no
 // Xcode project, no Gradle, no IDE. PROTOTYPE.
 //
-//	gofastr-mobile doctor [--platform ios-sim|android-emu]
-//	gofastr-mobile build  --platform ios-sim|android-emu --pkg ./examples/notes/notesmobile
-//	gofastr-mobile run    --platform ios-sim|android-emu --pkg ./examples/notes/notesmobile [--screenshot shot.png]
+//	gofastr-native doctor [--platform ios-sim|android-emu]
+//	gofastr-native build  --platform ios-sim|android-emu --pkg ./examples/notes/notesmobile
+//	gofastr-native run    --platform ios-sim|android-emu --pkg ./examples/notes/notesmobile [--screenshot shot.png]
 //
 // Run it from the Go module that holds the bind package (the module must
 // require golang.org/x/mobile; this one pins it with a tool directive).
@@ -24,12 +24,12 @@ import (
 	"time"
 )
 
-const usage = `gofastr-mobile builds a GoFastr app into a phone app and runs it.
+const usage = `gofastr-native builds a GoFastr app into a phone app and runs it.
 
 Usage:
-  gofastr-mobile doctor [--platform ios-sim|android-emu]
-  gofastr-mobile build  --platform ios-sim|android-emu --pkg <bind package> [flags]
-  gofastr-mobile run    --platform ios-sim|android-emu --pkg <bind package> [flags]
+  gofastr-native doctor [--platform ios-sim|android-emu]
+  gofastr-native build  --platform ios-sim|android-emu --pkg <bind package> [flags]
+  gofastr-native run    --platform ios-sim|android-emu --pkg <bind package> [flags]
 
 Flags (build, run):
   --platform    ios-sim (iOS simulator, needs a Mac with Xcode installed)
@@ -195,7 +195,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
-	fmt.Fprintf(stdout, "gofastr-mobile %s: %s (%s) from %s\n", sub, a.Name, a.ID, a.PkgPath)
+	fmt.Fprintf(stdout, "gofastr-native %s: %s (%s) from %s\n", sub, a.Name, a.ID, a.PkgPath)
 	opts := runOpts{device: *device, screenshot: *shot, wait: *wait}
 
 	var artifact string
@@ -210,7 +210,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "\ngofastr-mobile: %v\n", err)
+		fmt.Fprintf(stderr, "\ngofastr-native: %v\n", err)
 		if errors.Is(err, context.Canceled) {
 			return 130
 		}

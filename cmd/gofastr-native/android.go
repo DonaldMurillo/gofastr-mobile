@@ -98,7 +98,7 @@ func (s androidSDK) tool(name string) string { return filepath.Join(s.buildTools
 func buildAndroid(r *runner, a app, out string) (string, error) {
 	sdk, err := findAndroidSDK(r.dryRun)
 	if err != nil {
-		return "", fmt.Errorf("%w (run: gofastr-mobile doctor --platform android-emu)", err)
+		return "", fmt.Errorf("%w (run: gofastr-native doctor --platform android-emu)", err)
 	}
 	a = a.forAndroid(sdk.api)
 	work := filepath.Join(out, "work")
@@ -213,7 +213,7 @@ func runAndroid(r *runner, a app, apk string, opts runOpts) error {
 			return err
 		}
 	}
-	fmt.Fprintf(r.out, "\nRunning on %s.\n  Logs:     %s -s %s logcat -s gofastr-mobile GoLog chromium\n", serial, sdk.adb, serial)
+	fmt.Fprintf(r.out, "\nRunning on %s.\n  Logs:     %s -s %s logcat -s gofastr-native GoLog chromium\n", serial, sdk.adb, serial)
 	if a.HostTemplate == "" {
 		fmt.Fprintln(r.out, "  DevTools: chrome://inspect in desktop Chrome")
 	}
@@ -246,7 +246,7 @@ func androidDevice(r *runner, sdk androidSDK, want string) (string, error) {
 		}
 		names := strings.Fields(avds)
 		if len(names) == 0 {
-			return "", errors.New("no device attached and no AVD to boot: create one in Android Studio's Device Manager or with avdmanager (see gofastr-mobile doctor)")
+			return "", errors.New("no device attached and no AVD to boot: create one in Android Studio's Device Manager or with avdmanager (see gofastr-native doctor)")
 		}
 		avd = names[0]
 	}

@@ -1,12 +1,12 @@
 # UIKit renderer maintenance notes
 
 - Keep `*.swift` as ordinary, binding-independent library source; `sources.go` embeds it unchanged.
-- Put only gomobile adapters and application entry wiring in `cmd/gofastr-mobile/templates/ios/NativeApp.swift.tmpl`.
+- Put only gomobile adapters and application entry wiring in `cmd/gofastr-native/templates/ios/NativeApp.swift.tmpl`.
 - `GofastrNativeBackend` injects start/stop/root/render/dispatch and optional versioned `command`; JSON encoding and checks stay in the library, not bootstrap templates.
 - Startup/legacy calls use a serial queue; command calls use a bounded four-operation pool so saves do not block checkpoints. Pass the same host to pushed/presented controllers.
 - Keep live editing/IME/focus local; shared Go behavior owns save/draft/leave policy. Debounce checkpoints, never synchronously round-trip per keystroke.
 - Required Go wire flags must serialize even when false/zero; the Swift decoder intentionally rejects missing fields. Exercise actual UIKit navigation after changing the protocol.
-- Next time, run `go test ./cmd/gofastr-mobile ./render/ios`; on macOS with Xcode it also type-checks the library without any Go bindings.
+- Next time, run `go test ./cmd/gofastr-native ./render/ios`; on macOS with Xcode it also type-checks the library without any Go bindings.
 - Shared `presentation/v1` adapter details and verification notes live in `docs/presentation.md` in this directory.
 - Keep presentation coordination on the shared host: finish dismissal before applying a chained result, preserve editor/focus state, and send only opaque instance IDs through `respond` followed by read-only `complete`. Never turn a declared choice into an action or retry an uncertain response write.
 - Go is authoritative for selection min/max and continuation/commit/cancellation policy; UIKit only toggles declared enabled options and reports structured errors.
@@ -17,3 +17,5 @@
 - Typed controls, filters/selection/paging, accessible native row actions, tab restoration, public `openURL(_:)`/`checkpoint()` hookup, exact accessibility IDs, and verification limits live in `docs/components.md`. Preserve stable IDs and route-only metadata; never restore over a retained pending editor. Avoid a subclass property named `tabs` (UIKit owns it on iOS 18+).
 - Reusable `GofastrServiceRunner`, reminder delegate/cold-tap routing, private rich-share cleanup, explicit clipboard writes, recording/playback bounds, opaque service settlement, and visible-only live reads are documented in `docs/services.md`. Decode optional omitted `ServiceRequest.commit`; never replay OS work or replace dirty inputs. Keep watches on their separate queue, cancel with generations plus a read-only list checkpoint, and require real GUI acceptance before claiming mic/reminder/share success.
 - Document hierarchy and attachment previews follow `../../docs/mobile-design.md`. Keep wire DTOs Foundation-only in `GofastrAttachments.swift`; UIKit preview views belong in `GofastrFilePreview.swift`, so standalone Swift wire tests still compile.
+- Retained-list recovery follows `../../docs/mobile-reliability.md`: reopen only stale/expired live reads, once until progress or explicit reactivation. Keep `MobileReadRecovery` Foundation-only; never reset its budget from the automatic reopen or replay an action to recover a watch.
+- Native lifecycle/checkpoint sequencing and parent `suspend()`/`resume()`/`checkpoint(completion:)` glue live in `docs/reliability.md`. Keep `GofastrReliability.swift` Foundation-only; sequence short snapshots, not long mutations, fence same-revision replies, and defer snapshots during complete/leave so canonical saves or discarded drafts are not overwritten. Expire background lifetime once without retrying writes; resume only the visible attached controller and never steal retained editor ownership.
