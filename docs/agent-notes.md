@@ -1,5 +1,14 @@
 # Implementation notes
 
+## 2026-11-05 - Compiled adapters register before host manifests seal
+- Scope: extensions, packaging, webview, UIKit.
+- Trigger: registering extension JS in `webview.New` panicked when a legacy host had already sealed GoFastr's registry.
+- Approach: library package init uses `extension/webassets.Register`; per-app `NewWithExtensions` still controls authorization/loading. CLI discovers manifests only in compiled iOS dependencies and copies Swift unchanged.
+- Evidence: the legacy-builder coexistence suite catches the sealed-manifest case; Notes photo E2E covers both WebView styles, and CLI/UIKit tests cover core-only and extension-enabled sources.
+- Next time: separate static asset publication from runtime registration; preserve opaque `file-result -> complete`, current authorization, cancellation and unknown-write locks instead of adding another task lifecycle.
+- Details: [compiled extension authoring and limits](compiled-extensions.md). Native Android and physical camera/provider/VoiceOver/IME acceptance remain deferred.
+- Status: active.
+
 ## 2026-11-05 - Swipe snap-back must not animate open action targets
 - Scope: webview, gestures, acceptance.
 - Trigger: bounded real-pointer traces showed a summary hit on pointerdown and its row link on pointerup; stage 11 then began offscreen and left the menu open.

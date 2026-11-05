@@ -2,8 +2,9 @@
 
 Applications return the same Go `nativeui.Result.Files` definition used by the
 UIKit renderer. The library embeds `files.js` as `gfm-webview-files` and requires
-it from `gfm-webview`; `gfm-webview-files` requires the library-owned
-`photos.js` normalizer (`gfm-webview-photos`). No application JavaScript, paths, URLs, file-system handles,
+it from `gfm-webview`. Photo normalization now belongs to the explicitly registered
+`extensions/photos` compiled adapter, loaded before hello; see
+[compiled extensions](../../../docs/compiled-extensions.md). No application JavaScript, paths, URLs, file-system handles,
 new dependencies, or second application router are involved. See
 [presentations.md](presentations.md) for the companion modal adapter.
 
@@ -225,7 +226,7 @@ lost writes, and physical chooser/camera behavior in browser/platform acceptance
 
 ```sh
 node --check render/webview/files.js
-node --check render/webview/photos.js
+node --check extensions/photos/photos.js
 node --check render/webview/presentation.js
 node --check render/webview/webview.js
 node --test render/webview/files.test.cjs render/webview/presentation.test.cjs

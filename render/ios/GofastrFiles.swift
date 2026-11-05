@@ -1,21 +1,36 @@
 import Foundation
 import UniformTypeIdentifiers
 
+struct MobileFileExtension: Codable {
+    let name: String
+    let payload: String
+
+    var isValid: Bool { !name.isEmpty && name.utf8.count <= 85 && !payload.isEmpty && payload.utf8.count <= 8192 }
+}
+
+
 struct MobileFiles: Decodable {
     let id: String
     let pick: MobileFilePick?
     let export: MobileFileExport?
     let photo: MobilePhoto?
+    let `extension`: MobileFileExtension?
+
+    var operation: MobileFileExtension? {
+        if let operation = self.extension { return operation }
+        guard let photo, let data = try? JSONEncoder().encode(photo) else { return nil }
+        return MobileFileExtension(name: "gofastr.photos/v1", payload: String(decoding: data, as: UTF8.self))
+    }
 
     var isValid: Bool {
-        !id.isEmpty && [pick != nil, export != nil, photo != nil].filter { $0 }.count == 1 &&
+        !id.isEmpty && [pick != nil, export != nil, photo != nil, self.extension != nil].filter { $0 }.count == 1 &&
             (pick.map { (0...MobileFileAccess.maximumBytes).contains($0.maxBytes) } ?? true) &&
-            (photo?.isValid ?? true)
+            (photo?.isValid ?? true) && (self.extension?.isValid ?? true)
     }
 }
 
-struct MobilePhoto: Decodable {
-    enum Source: String, Decodable { case library, camera }
+struct MobilePhoto: Codable {
+    enum Source: String, Codable { case library, camera }
     let title: String
     let source: Source
     let maxBytes: Int

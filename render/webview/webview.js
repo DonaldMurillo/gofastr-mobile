@@ -210,13 +210,21 @@
     return reply;
   };
 
-  const connect = root => connection ||= Promise.resolve(services?.capabilities() || { 'live/v1': 'available' }).then(serviceCapabilities => request(root, { kind: 'hello', hello: {
+  const loadExtensions = async root => {
+    const modules = JSON.parse(root.dataset.gfwConfig || '{}').extensions || [];
+    for (const name of modules) {
+      if (!/^gfn-extension-[a-f0-9]{32}$/.test(name) || typeof window.__gofastr?.loadModule !== 'function') throw new Error('A compiled extension could not be loaded.');
+      await window.__gofastr.loadModule(name);
+    }
+  };
+  const connect = root => connection ||= loadExtensions(root).then(() => services?.capabilities() || { 'live/v1': 'available' }).then(serviceCapabilities => request(root, { kind: 'hello', hello: {
     minimum: 1, maximum: 1, renderer: 'webview', capabilities: {
       'navigation/v1': 'available', 'editor/v1': 'available', 'drafts/v1': 'available',
       'sheets/v1': 'fallback', 'share/v1': typeof navigator.share === 'function' ? 'available' : 'fallback',
       'haptics/v1': typeof navigator.vibrate === 'function' ? 'fallback' : 'unavailable', 'announcement/v1': 'available',
       'presentation/v1': 'available', 'files/v1': files?.capability || 'unavailable',
       'photos/v1': files?.photoCapability?.() || 'unavailable', 'camera/v1': files?.photoCapability?.() || 'unavailable',
+      ...(files?.capabilities?.() || {}),
       ...serviceCapabilities,
     },
   } })).then(reply => {

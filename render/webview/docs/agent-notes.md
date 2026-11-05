@@ -1,5 +1,12 @@
 # WebView implementation notes
 
+## 2026-11-05 - Compiled file adapters use the shared foreground lifecycle
+- Scope: extension assets and file acquisition.
+- Approach: library init registers content-addressed assets through `extension/webassets`; app-specific config loads selected modules before hello. Never register new behaviors after a host seals its manifest.
+- Evidence: legacy/shared host coexistence tests and Notes photo E2E, plus a non-photo adapter in `files.test.cjs`.
+- Next time: use the `prepare`/job/normalize seam in [compiled extensions](../../../docs/compiled-extensions.md); keep result submission, recovery and focus ownership in `files.js`.
+- Status: active; no app-authored JavaScript or new navigator.
+
 Service/live integration and stable parent acceptance selectors:
 [`services-live.md`](services-live.md).
 

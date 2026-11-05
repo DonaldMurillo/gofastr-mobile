@@ -2,6 +2,7 @@ package notesnative
 
 import (
 	"bytes"
+	"encoding/json"
 	"image"
 	"image/jpeg"
 	"strings"
@@ -36,7 +37,9 @@ func TestPhotosAttachThroughNativeBinding(t *testing.T) {
 	}
 	for _, outcome := range []nativeui.EffectStatus{nativeui.EffectCancelled, nativeui.EffectDenied, nativeui.EffectFailed} {
 		shown = filesAction(t, nativeui.Command{Connection: connection, Instance: attachmentList.Instance, RequestID: "photo-" + string(outcome), Action: "photo"})
-		if shown.Response.Files.Photo.Source != photos.Library || shown.Response.Files.Photo.MaxDimension != photos.MaxDimension {
+		var policy photos.Request
+		operation := shown.Response.Files.Extension
+		if operation == nil || operation.Name != "gofastr.photos/v1" || json.Unmarshal([]byte(operation.Payload), &policy) != nil || policy.Source != photos.Library || policy.MaxDimension != photos.MaxDimension {
 			t.Fatal("photo request lost source or bounds")
 		}
 		filesActionResult(t, nativeui.Command{Kind: "file-result", Connection: connection, Instance: attachmentList.Instance, RequestID: "result-" + string(outcome), FileID: shown.FileID,

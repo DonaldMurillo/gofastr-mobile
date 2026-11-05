@@ -339,6 +339,11 @@ hosted-WebView provider acceptance, and M6 extensions remain separate gates.
 
 ### M6 — Extensions, developer experience, and measured optimization
 
+The [photo extension pilot](compiled-extensions.md) now proves explicit Go
+registration, package-owned UIKit/WebView adapters, compiled dependency discovery,
+and reuse of the existing file lifecycle. Arbitrary component/service extensions,
+generated bindings, inspector, release tooling, and profiling remain future work.
+
 - Prove one separately packaged compiled capability/component extension with an
   explicit support matrix and cleanup. Add contract-generated Swift/Android/JS
   DTOs and validators only after the contract stabilizes; generation checks must

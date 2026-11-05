@@ -1,15 +1,18 @@
 # UIKit photo acquisition adapter
 
+Sources now live in `extensions/photos/`, discovered through its compiled package
+manifest and registered from Go. See [the extension contract](../../../docs/compiled-extensions.md).
+
 `GofastrPhotos.swift` implements binding-independent Foundation/CoreGraphics/ImageIO
 helpers; `GofastrPhotoController.swift` owns UIKit picker delegates and video-only
-camera permission. No dependencies, app templates, generated Go bindings, or CLI
-packaging changes are required by the library. The parent task owns Go admission,
+camera permission. No dependencies or app-authored native code are required.
+The extension manifest supplies CLI packaging; the application owns Go admission,
 screens, purpose-string packaging, and actual GUI/device acceptance.
 
 ## Contract and capability negotiation
 
-`MobileFiles` accepts exactly one `pick`, `export`, or optional `photo`. Existing
-file requests omit `photo` and decode unchanged. The photo wire shape is:
+`MobileFiles` accepts exactly one `pick`, `export`, registered `extension`, or
+legacy `photo`. Existing file requests decode unchanged. The legacy wire shape is:
 
 ```json
 {"id":"app-continuation","photo":{"title":"Choose photo","source":"library","maxBytes":1048576,"maxDimension":2048}}
@@ -22,7 +25,8 @@ the existing `MobileFilePayload`. It never returns asset IDs, URLs, original
 names, paths, original metadata, or a simulated photo. Limits too small to hold
 even a one-pixel JPEG produce `failed`, never oversized or empty success.
 
-Hello always advertises `photos/v1` as available. Simulator builds explicitly
+When the compiled photo factory is installed, hello advertises `photos/v1` as
+available. A core-only renderer does not advertise photo support. Simulator builds explicitly
 disable `camera/v1` before consulting permission APIs; simulator camera claims
 are not physical capture evidence. On devices, `camera/v1` is available only
 when UIKit reports a camera capable of still-image acquisition **and** the main

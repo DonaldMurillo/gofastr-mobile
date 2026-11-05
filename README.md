@@ -81,6 +81,8 @@ Saved-note attachments also offer **Choose photo** and **Take photo** through
 [typed photo services](docs/photos-services.md), normalizing to bounded JPEGs
 without original EXIF/GPS metadata. Native camera acceptance requires a real
 device; the WebView path is an explicitly disclosed chooser fallback.
+Photo acquisition is the first [compiled extension](docs/compiled-extensions.md):
+Notes registers it in Go; its UIKit/WebView adapters belong to the library package.
 Photos display inside the note and open a larger attachment preview. Both
 renderers share the same Go [image preview definitions](docs/image-previews.md).
 

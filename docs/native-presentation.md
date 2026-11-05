@@ -163,10 +163,14 @@ Notes uses the shared Go file draft store; the optional older backend without
 but are not encrypted secrets, committed notes, cloud sync, autosave, or conflict
 handling. The shared Notes list still caps at 200 entries.
 
-Missing: Android native renderer, tabs, arbitrary component trees, custom native
-widgets, broad form controls, scene restoration, deep-link delivery,
-transactional presentation-effect acknowledgements, and
-a public GoFastr renderer-host mounting seam. No remote UI/code loading is added.
+The later [component slice](mobile-components.md) adds tabs, typed mixed form
+controls, filters/selection/paging, swipes, and bounded route restoration; the
+[device service slice](mobile-services.md) adds typed platform tasks. Photo
+acquisition now lives in a [compiled extension](compiled-extensions.md).
+
+Missing: Android native renderer, arbitrary component trees/custom native widgets,
+general scene restoration, physical-device release tooling, and a public GoFastr
+renderer-host mounting seam. No remote UI/code loading is added.
 
 **Bootstrap boundary:** startup composes `notesapp/application.Open` without a
 web presentation, then uses `mobilehost.ServiceOnly` for the complete in-memory

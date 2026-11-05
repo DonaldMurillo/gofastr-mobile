@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/DonaldMurillo/gofastr-native/extension/webassets"
+
 	"github.com/DonaldMurillo/gofastr-native/mobileui"
 	"github.com/DonaldMurillo/gofastr-native/nativeui"
 	appui "github.com/DonaldMurillo/gofastr/core-ui/app"
@@ -42,9 +44,6 @@ var presentationAdapter string
 //go:embed files.js
 var filesAdapter string
 
-//go:embed photos.js
-var photosAdapter string
-
 //go:embed components.js
 var componentsAdapter string
 
@@ -66,9 +65,8 @@ var rendererServices = registry.RegisterBehavior("gfm-webview-services", service
 var rendererLive = registry.RegisterBehavior("gfm-webview-live", liveAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires("gfm-webview-components"))
 var rendererLifecycle = registry.RegisterBehavior("gfm-webview-lifecycle", lifecycleAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires(headless.LeaveGuardBehaviorName))
 var rendererComponents = registry.RegisterBehavior("gfm-webview-components", componentsAdapter, registry.Markers("[data-gfw-screen]"))
-var rendererPhotos = registry.RegisterBehavior("gfm-webview-photos", photosAdapter, registry.Markers("[data-gfw-screen]"))
 var rendererFiles = registry.RegisterBehavior("gfm-webview-files", filesAdapter, registry.Markers("[data-gfw-screen]"),
-	registry.Requires("gfm-webview-photos", "gfm-webview-foreground"))
+	registry.Requires("gfm-webview-foreground"))
 var rendererPresentation = registry.RegisterBehavior("gfm-webview-presentation", presentationAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires("gfm-webview-foreground"))
 var rendererBehavior = registry.RegisterBehavior("gfm-webview", behavior, registry.Markers("[data-gfw-screen]"),
 	registry.Requires(headless.LeaveGuardBehaviorName, "gfm-webview-presentation", "gfm-webview-files", "gfm-webview-components", "gfm-webview-services", "gfm-webview-live", "gfm-webview-lifecycle"),
@@ -76,10 +74,11 @@ var rendererBehavior = registry.RegisterBehavior("gfm-webview", behavior, regist
 
 // Renderer adapts an immutable registry to the existing GoFastr web host.
 type Renderer struct {
-	screens  *nativeui.App
-	platform mobileui.Platform
-	host     *uihost.UIHost
-	runtime  *nativeui.Runtime
+	screens    *nativeui.App
+	platform   mobileui.Platform
+	host       *uihost.UIHost
+	runtime    *nativeui.Runtime
+	extensions []string
 }
 
 // New creates an SSR host without mounting routes or invoking screen handlers.
@@ -105,6 +104,13 @@ func New(screens *nativeui.App, platform mobileui.Platform, options ...nativeui.
 		return nil, err
 	}
 	renderer := &Renderer{screens: screens, platform: platform, runtime: runtime}
+	for _, definition := range screens.Extensions() {
+		name, err := webassets.Module(definition)
+		if err != nil {
+			return nil, err
+		}
+		renderer.extensions = append(renderer.extensions, name)
+	}
 	site := appui.NewApp("Mobile")
 	site.WithTheme(mobileui.Theme(platform))
 	for _, route := range screens.Routes() {
@@ -178,6 +184,7 @@ func (screen *pageScreen) RenderCtx(ctx context.Context) render.HTML {
 }
 
 type clientConfig struct {
+	Extensions    []string             `json:"extensions,omitempty"`
 	DefaultAction string               `json:"defaultAction,omitempty"`
 	Committed     bool                 `json:"committed,omitempty"`
 	Root          string               `json:"root"`
@@ -237,7 +244,7 @@ func (renderer *Renderer) markup(ctx context.Context, screen nativeui.Screen, fa
 		}
 	}
 	config := clientConfig{Root: renderer.screens.Root(), Route: screen.Route, Routes: renderer.screens.Routes(),
-		List: screen.List, Tabs: screen.Tabs, ActiveTab: screen.ActiveTab, Live: screen.Live}
+		List: screen.List, Tabs: screen.Tabs, ActiveTab: screen.ActiveTab, Live: screen.Live, Extensions: renderer.extensions}
 	if primary >= 0 {
 		config.DefaultAction = screen.Actions[primary].ID
 	}

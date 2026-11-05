@@ -86,6 +86,32 @@ const exported = (extra = {}) => ({ id: 'export-go-key', export: { name: 'note.t
 const presentation = () => ({ id: 'go-presentation', kind: 'dialog', title: 'Choose', dismissible: true, choices: [{ id: 'done', label: 'Done' }] });
 
 const photoRequest = (extra = {}) => ({ id: 'photo-go-key', photo: { title: 'Choose photo', source: 'library', maxBytes: 1048576, maxDimension: 2048, ...extra } });
+
+test('independently registered acquisition uses the existing file settlement without a photo case', async () => {
+  const fixture = harness();
+  const results = [];
+  let runs = 0;
+  fixture.window.__gofastr_file_extension_definitions.push({
+    name: 'example.document/v1', capabilities: () => ({ 'example.document/v1': 'fallback' }),
+    prepare: (request) => request.title ? {
+      kind: 'document', title: request.title, hint: 'Choose a document', label: 'Choose document', attributes: { accept: '.txt' },
+      supported: () => true, job: () => ({ cancel() {} }), progress: 'Preparing document',
+      normalize: async () => { runs++; return { name: 'document.txt', mediaType: 'text/plain', data: btoa('content') }; },
+    } : null,
+  });
+  const dialog = fixture.open({ id: 'attach', extension: { name: 'example.document/v1', payload: JSON.stringify({ title: 'Import document' }) } }, async result => results.push(result));
+  assert.equal(dialog.dataset.gfwFile, 'document');
+  const input = dialog.querySelector('[data-gfw-file-input]');
+  assert.equal(input.getAttribute('accept'), '.txt');
+  input.files = [{ name: 'document.txt' }];
+  input.dispatchEvent({ type: 'change' });
+  await flush();
+  assert.equal(runs, 1);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].file.mediaType, 'text/plain');
+  assert.equal(fixture.adapter.has(), false);
+  assert.equal(fixture.adapter.capabilities()['example.document/v1'], 'fallback');
+});
 const jpeg = (width = 40, height = 30, size = 32, orientation = 1) => {
   const frame = Buffer.from([0xff, 0xc0, 0, 17, 8, height >> 8, height & 255, width >> 8, width & 255, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0]);
   const exif = Buffer.from([0xff, 0xe1, 0, 34, 69, 120, 105, 102, 0, 0, 73, 73, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 1, 3, 0, 1, 0, 0, 0, orientation, 0, 0, 0, 0, 0, 0, 0]);
@@ -165,7 +191,7 @@ const harness = (photoOptions) => {
     setTimeout(callback, delay) { const timer = {}; timers.set(timer, { callback, delay }); return timer; }, clearTimeout(timer) { timers.delete(timer); },
     CustomEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } } };
   const photos = photoOptions && photoPrimitives(context, document, photoOptions);
-  for (const module of ['presentation.js', 'photos.js', 'files.js', 'components.js']) runInNewContext(readFileSync(join(__dirname, module), 'utf8'), context);
+  for (const module of ['presentation.js', '../../extensions/photos/photos.js', 'files.js', 'components.js']) runInNewContext(readFileSync(join(__dirname, module), 'utf8'), context);
   const root = document.createElement('div');
   root.setAttribute('data-gfw-screen', '');
   const screen = document.createElement('section');

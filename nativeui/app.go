@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/DonaldMurillo/gofastr-native/behavior"
+	"github.com/DonaldMurillo/gofastr-native/extension"
 )
 
 var (
@@ -22,14 +23,31 @@ var (
 
 // App is an immutable route registry shared by native renderers.
 type App struct {
-	root   string
-	routes []Route
+	root       string
+	routes     []Route
+	extensions *extension.Registry
 }
 
 // New validates a screen registry. Register literal routes before parameterized
 // routes when their patterns overlap. No presentation code is downloaded.
 func New(root string, routes ...Route) (*App, error) {
-	app := &App{root: root, routes: append([]Route(nil), routes...)}
+	return NewWithExtensions(root, nil, routes...)
+}
+
+// NewWithExtensions explicitly enables compiled file-acquisition adapters.
+func NewWithExtensions(root string, definitions []extension.Definition, routes ...Route) (*App, error) {
+	extensions, err := extension.New(definitions...)
+	if err != nil {
+		return nil, err
+	}
+	for _, definition := range extensions.Definitions() {
+		for _, capability := range definition.Manifest.Capabilities {
+			if knownCapability(Capability(capability)) && capability != string(CapabilityPhotos) && capability != string(CapabilityCamera) {
+				return nil, fmt.Errorf("nativeui: extension cannot replace core capability %q", capability)
+			}
+		}
+	}
+	app := &App{root: root, routes: append([]Route(nil), routes...), extensions: extensions}
 	seen := make(map[string]bool)
 	for index, route := range app.routes {
 		if !validRoute(route.Path) || route.Screen == nil || seen[route.Path] {
@@ -77,6 +95,9 @@ func New(root string, routes ...Route) (*App, error) {
 
 // Root returns the initial route for a native host.
 func (app *App) Root() string { return app.root }
+
+// Extensions returns detached definitions for compiled renderer construction.
+func (app *App) Extensions() []extension.Definition { return app.extensions.Definitions() }
 
 // Routes returns registration-ordered metadata, with sorted action IDs.
 // Mutating the returned slices does not change the immutable registry.
@@ -217,11 +238,16 @@ func (app *App) result(ctx context.Context, route Route, result Result) (Respons
 		response.Service = cloneService(result.Service)
 	}
 	if result.Files != nil {
-		if err := validateFiles(*result.Files, route.Files); err != nil {
+		if err := validateFiles(*result.Files, route.Files, app.extensions); err != nil {
 			return Response{}, err
 		}
 		if result.Presentation != nil || result.Navigation != nil || result.Share != "" {
 			return Response{}, errors.New("nativeui: file operations cannot compete with other presentations")
+		}
+		if result.Files.Extension != nil {
+			frozen, operation := *result.Files, *result.Files.Extension
+			frozen.Extension = &operation
+			response.Files = &frozen
 		}
 	}
 	if result.Presentation != nil {

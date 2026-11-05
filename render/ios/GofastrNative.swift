@@ -226,9 +226,9 @@ final class MobileHost {
         let capabilities = [
             "navigation/v1": "available", "editor/v1": "available", "drafts/v1": "available",
             "share/v1": "available", "haptics/v1": "available", "sheets/v1": "available", "announcement/v1": "available",
-            "presentation/v1": "available", "files/v1": "available", "photos/v1": "available",
-            "camera/v1": MobilePhotoPlatform.cameraAvailable() ? "available" : "unavailable", "live/v1": "available"
+            "presentation/v1": "available", "files/v1": "available", "live/v1": "available"
         ].merging(GofastrServiceRunner.capabilities()) { _, service in service }
+            .merging(MobileFileExtensions.capabilities()) { _, service in service }
         command(["kind": "hello", "hello": ["minimum": 1, "maximum": 1, "renderer": "uikit", "capabilities": capabilities]]) { result in
             if case .success(let reply) = result { self.connection = reply.connection ?? "" }
             completion(result)
@@ -329,15 +329,15 @@ public final class GofastrNativeRenderer {
                       !screen.navigationBlocked, screen.presentedViewController == nil else { return false }
             } else { return false }
         }
-        let cameraAvailable = MobilePhotoPlatform.cameraAvailable()
+        let extensionCapabilities = MobileFileExtensions.capabilities().filter { $0.value == "available" }.map(\.key)
         let target = host.queue.sync { () -> MobileScreen? in
             guard let encoded = try? self.host.backend.render(route, "{}"),
                   let response = try? JSONDecoder().decode(MobileResponse.self, from: Data(encoded.utf8)),
                   response.version == 1, let screen = response.screen, response.navigation == nil,
                   response.presentation == nil, response.files == nil, response.service == nil, response.share == nil else { return nil }
             let services = GofastrServiceRunner.capabilities().filter { $0.value == "available" }.map(\.key)
-            let available = Set(["navigation/v1", "editor/v1", "drafts/v1", "share/v1", "haptics/v1", "sheets/v1", "announcement/v1", "presentation/v1", "files/v1", "photos/v1", "live/v1"] + services)
-            return (screen.requires ?? []).allSatisfy { available.contains($0.capability) || ($0.capability == "camera/v1" && cameraAvailable) } ? screen : nil
+            let available = Set(["navigation/v1", "editor/v1", "drafts/v1", "share/v1", "haptics/v1", "sheets/v1", "announcement/v1", "presentation/v1", "files/v1", "live/v1"] + services + extensionCapabilities)
+            return (screen.requires ?? []).allSatisfy { available.contains($0.capability) } ? screen : nil
         }
         guard let target else { return false }
         if starting { queuedRoutes.append((route, target.form?.draft?.key)) }

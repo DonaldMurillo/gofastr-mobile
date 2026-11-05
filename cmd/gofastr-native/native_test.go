@@ -157,7 +157,7 @@ func TestPrepareIOSHostCopiesLibrarySourcesUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sources) != len(entries)+1 || sources[0] != filepath.Join(directory, "App.swift") {
+	if len(sources) != len(entries)+2 || sources[0] != filepath.Join(directory, "App.swift") {
 		t.Fatalf("unexpected Swift compilation inputs: %v", sources)
 	}
 	for index, entry := range entries {
@@ -207,7 +207,7 @@ func TestPrepareIOSHostCopiesLibrarySourcesUnchanged(t *testing.T) {
 			}
 			if mode == "webview" {
 				hostEntries, err := hostios.Sources.ReadDir(".")
-				if err != nil || len(sources) != len(entries)+len(hostEntries)+1 {
+				if err != nil || len(sources) != len(entries)+len(hostEntries)+2 {
 					t.Fatalf("WebView service host omitted library sources: %v, %v", sources, err)
 				}
 				for _, entry := range hostEntries {

@@ -37,13 +37,17 @@ final class MobileForegroundCoordinator {
               respond: @escaping (MobileFileResult) -> Void) -> Bool {
         guard active == nil, !identifier.isEmpty, source.presentedViewController == nil else { return false }
         let focus = self.focus ?? MobileForegroundFocus(source)
-        self.focus = focus
         let task: MobileForegroundTask
-        if model.isValid, let photo = model.photo {
-            task = MobilePhotoTask(photo, identifier: identifier, source: source, focus: focus, queue: fileQueue, respond: respond)
+        if let operation = model.operation {
+            guard model.isValid, let adapter = MobileFileExtensions.make(operation, identifier: identifier, source: source, focus: focus, queue: fileQueue, respond: respond) else {
+                respond(MobileFileResult(status: .unsupported))
+                return true
+            }
+            task = adapter
         } else {
             task = MobileFileTask(model, identifier: identifier, source: source, focus: focus, queue: fileQueue, respond: respond)
         }
+        self.focus = focus
         active = task
         task.show()
         return true

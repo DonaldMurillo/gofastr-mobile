@@ -71,6 +71,7 @@ type app struct {
 	CameraUsage     string
 	MicrophoneUsage string
 	URLScheme       string
+	Extensions      []compiledExtension
 }
 
 var (

@@ -190,5 +190,23 @@
     } finally { operation.cancel(); }
   };
   window.__gofastr_photos = { supported, normalize, job };
-  if (window.__gofastr) (window.__gofastr.loadedModules ||= {})['gfm-webview-photos'] = true;
+  (window.__gofastr_file_extension_definitions ||= []).push({
+    name: 'gofastr.photos/v1',
+    capabilities: () => ({ 'photos/v1': supported() ? 'fallback' : 'unavailable', 'camera/v1': supported() ? 'fallback' : 'unavailable' }),
+    prepare: (policy) => {
+      if (!policy || typeof policy.title !== 'string' || !policy.title || !['library', 'camera'].includes(policy.source) ||
+          !Number.isSafeInteger(policy.maxBytes) || policy.maxBytes < 1 || policy.maxBytes > 1048576 ||
+          !Number.isSafeInteger(policy.maxDimension) || policy.maxDimension < 1 || policy.maxDimension > 2048) return null;
+      return {
+        kind: 'photo', title: policy.title, source: policy.source,
+        hint: policy.source === 'camera' ?
+          'This browser chooser may offer a camera. It does not guarantee camera capture or permission. Selected JPEG or PNG images are reencoded without source metadata.' :
+          'Choose one JPEG or PNG image. It is resized and reencoded as JPEG without source metadata.',
+        label: policy.source === 'camera' ? 'Open browser photo chooser (may offer camera)' : 'Choose photo',
+        attributes: { accept: 'image/*', ...(policy.source === 'camera' ? { capture: 'environment' } : {}) },
+        supported, job, normalize: (file, operation) => normalize(file, policy, operation),
+        progress: 'Preparing a bounded JPEG photo…',
+      };
+    },
+  });
 })();

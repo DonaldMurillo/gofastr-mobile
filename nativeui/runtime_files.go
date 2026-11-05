@@ -30,7 +30,17 @@ func (runtime *Runtime) presentFiles(session *runtimeSession, record *runtimeAct
 		}
 		return
 	}
-	support := session.contract.Capabilities[definition.capability()]
+	capability := definition.capability()
+	if definition.Extension != nil {
+		declared, err := runtime.app.extensions.Validate(*definition.Extension)
+		if err != nil {
+			reply.Response.Files = nil
+			reply.Error = commandFailure("validation", err.Error())
+			return
+		}
+		capability = Capability(declared)
+	}
+	support := session.contract.Capabilities[capability]
 	if support != SupportAvailable && support != SupportFallback {
 		reply.Response.Files = nil
 		message := "File access is unavailable in this renderer."
@@ -100,13 +110,15 @@ func (runtime *Runtime) fileResult(ctx context.Context, session *runtimeSession,
 	}
 	switch outcome.Status {
 	case EffectCompleted:
-		if pending.definition.Pick != nil || pending.definition.Photo != nil {
+		if pending.definition.acquires() {
 			if outcome.File == nil {
 				reply.Error = commandFailure("validation", "The picker did not return a file.")
 				return reply
 			}
 			var err error
-			if pending.definition.Photo != nil {
+			if pending.definition.Extension != nil {
+				err = runtime.app.extensions.Accept(*pending.definition.Extension, *outcome.File)
+			} else if pending.definition.Photo != nil {
 				err = pending.definition.Photo.Accept(*outcome.File)
 			} else {
 				err = pending.definition.Pick.Accept(*outcome.File)
@@ -129,7 +141,7 @@ func (runtime *Runtime) fileResult(ctx context.Context, session *runtimeSession,
 		return reply
 	}
 	values := maps.Clone(pending.values)
-	if outcome.Status == EffectCompleted && (pending.definition.Pick != nil || pending.definition.Photo != nil) {
+	if outcome.Status == EffectCompleted && pending.definition.acquires() {
 		var validationErr error
 		values, validationErr = continuationValues(session, pending.action, pending.values, command.Values)
 		if validationErr != nil {
@@ -144,7 +156,7 @@ func (runtime *Runtime) fileResult(ctx context.Context, session *runtimeSession,
 	session.mu.Unlock()
 	result := Response{Version: 1}
 	var err error
-	if outcome.Status == EffectCompleted && (definition.Pick != nil || definition.Photo != nil) {
+	if outcome.Status == EffectCompleted && definition.acquires() {
 		if definition.Commit {
 			runtime.mutations.Lock()
 		}

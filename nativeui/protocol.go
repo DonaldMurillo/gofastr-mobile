@@ -62,6 +62,10 @@ type Contract struct {
 
 // Negotiate rejects incompatible compiled peers instead of silently changing renderers.
 func Negotiate(hello Hello) (Contract, error) {
+	return negotiate(hello, knownCapability)
+}
+
+func negotiate(hello Hello, allowed func(Capability) bool) (Contract, error) {
 	if hello.Minimum < 1 || hello.Maximum < hello.Minimum || hello.Minimum > ProtocolVersion || hello.Maximum < ProtocolVersion {
 		return Contract{}, errors.New("nativeui: incompatible mobile protocol")
 	}
@@ -73,7 +77,7 @@ func Negotiate(hello Hello) (Contract, error) {
 	}
 	contract := Contract{Version: ProtocolVersion, Renderer: hello.Renderer, Capabilities: make(map[Capability]Support)}
 	for capability, support := range hello.Capabilities {
-		if !knownCapability(capability) || (support != SupportAvailable && support != SupportFallback && support != SupportUnavailable) {
+		if !allowed(capability) || (support != SupportAvailable && support != SupportFallback && support != SupportUnavailable) {
 			return Contract{}, fmt.Errorf("nativeui: invalid capability %q", capability)
 		}
 		contract.Capabilities[capability] = support
@@ -88,7 +92,7 @@ func Negotiate(hello Hello) (Contract, error) {
 func (contract Contract) Check(requirements []Requirement) error {
 	for _, requirement := range requirements {
 		support := contract.Capabilities[requirement.Capability]
-		if !knownCapability(requirement.Capability) || (support != SupportAvailable && !(support == SupportFallback && requirement.AllowFallback)) {
+		if support != SupportAvailable && !(support == SupportFallback && requirement.AllowFallback) {
 			return fmt.Errorf("nativeui: required capability %q is unavailable", requirement.Capability)
 		}
 	}

@@ -39,6 +39,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     ))
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        GofastrCompiledExtensions.install()
         window = renderer.makeWindow()
 {{if .URLScheme}}        if let url = options?[.url] as? URL { _ = open(url) }
 {{end}}        return true

@@ -262,8 +262,8 @@ func TestRendererAssetsTravelThroughTheUIHost(t *testing.T) {
 		}
 	}
 	status, _, source = fixture.request(t, "GET", "/__gofastr/runtime/gfm-webview-photos.js", "", "text/javascript", "")
-	if status != 200 || !strings.Contains(source, "createImageBitmap") || !strings.Contains(source, "'from-image'") || !strings.Contains(source, "canvas.toBlob") {
-		t.Fatalf("photo normalizer was not served by the host: %d %s", status, source)
+	if status != 404 {
+		t.Fatalf("an app without extensions must not ship a core photo adapter: %d", status)
 	}
 	status, _, source = fixture.request(t, "GET", "/__gofastr/comp/gfm-webview.css", "", "text/css", "")
 	if status != 200 || !strings.Contains(source, "gfw-field") || !strings.Contains(source, "var(--color-text)") {

@@ -9,6 +9,8 @@ import (
 
 	"github.com/DonaldMurillo/gofastr-native/device/files"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/extension"
+	"github.com/DonaldMurillo/gofastr-native/extensions/photos"
 	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
@@ -32,7 +34,7 @@ func New(service *notes.Service, stores ...*files.Store) (*nativeui.App, error) 
 		aboutRoute("/settings/about", "pop"),
 	}
 	routes = append(append(append(routes, fileRoutes(service, attachments)...), behaviorRoutes()...), settingsRoute())
-	return nativeui.New(Root, tabShell(routes)...)
+	return nativeui.NewWithExtensions(Root, []extension.Definition{photos.Definition()}, tabShell(routes)...)
 }
 
 func editor(service *notes.Service, store *files.Store) nativeui.Render {

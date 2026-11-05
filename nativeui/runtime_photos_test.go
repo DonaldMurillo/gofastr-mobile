@@ -86,7 +86,7 @@ func TestPhotosThroughCommandBoundary(t *testing.T) {
 func TestPhotoFileRequestValidation(t *testing.T) {
 	photo := &photos.Request{Title: "Photo", Source: photos.Camera, MaxBytes: files.MaxBytes, MaxDimension: photos.MaxDimension}
 	handlers := map[string]FileRespond{"photo": func(context.Context, Request, FileResult) (Result, error) { return Result{}, nil }}
-	if err := validateFiles(FileRequest{ID: "photo", Photo: photo}, handlers); err != nil {
+	if err := validateFiles(FileRequest{ID: "photo", Photo: photo}, handlers, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, request := range []FileRequest{
@@ -95,7 +95,7 @@ func TestPhotoFileRequestValidation(t *testing.T) {
 		{ID: "unregistered", Photo: photo},
 		{ID: "photo", Photo: &photos.Request{Title: "Video", Source: "video", MaxBytes: files.MaxBytes, MaxDimension: photos.MaxDimension}},
 	} {
-		if err := validateFiles(request, handlers); err == nil {
+		if err := validateFiles(request, handlers, nil); err == nil {
 			t.Fatalf("accepted invalid photo request: %+v", request)
 		}
 	}

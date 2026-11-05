@@ -13,14 +13,20 @@ arbitrary camera/filesystem access. Native Android remains deferred.
 
 ## Go API
 
+Register `photos.Definition()` from `extensions/photos` with
+`nativeui.NewWithExtensions`; see [compiled extension authoring](compiled-extensions.md).
+
 ```go
-nativeui.Result{Files: &nativeui.FileRequest{
-    ID: "photo", Commit: true,
-    Photo: &photos.Request{
-        Title: "Choose photo", Source: photos.Library,
-        MaxBytes: files.MaxBytes, MaxDimension: photos.MaxDimension,
-    },
-}}
+operation, err := photos.Acquire(photos.Request{
+    Title: "Choose photo", Source: photos.Library,
+    MaxBytes: files.MaxBytes, MaxDimension: photos.MaxDimension,
+})
+if err != nil {
+    return nativeui.Result{}, err
+}
+return nativeui.Result{Files: &nativeui.FileRequest{
+    ID: "photo", Commit: true, Extension: operation,
+}}, nil
 ```
 
 Use `photos.Camera` to request capture. Register the same ordinary

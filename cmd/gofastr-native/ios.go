@@ -31,6 +31,13 @@ import (
 
 func buildIOS(r *runner, a app, out string) (string, error) {
 	a = a.forIOS()
+	if a.HostTemplate == "" {
+		definitions, err := discoverExtensions(r, a.PkgPath)
+		if err != nil {
+			return "", err
+		}
+		a.Extensions = definitions
+	}
 	work := filepath.Join(out, "work")
 	bin := filepath.Join(work, "bin")
 	if err := bootstrapGomobile(r, bin); err != nil {
@@ -117,6 +124,11 @@ func prepareIOSHost(r *runner, a app, directory string) ([]string, error) {
 		return nil, err
 	}
 	sources = append(sources, rendererSources...)
+	extensionSources, err := copyIOSExtensions(r, a.Extensions, filepath.Join(directory, "renderer"))
+	if err != nil {
+		return nil, err
+	}
+	sources = append(sources, extensionSources...)
 	if a.Renderer != "native" {
 		hostSources, err := copyIOSLibrary(r, hostios.Sources, filepath.Join(directory, "host"), "WebView service adapter")
 		if err != nil {

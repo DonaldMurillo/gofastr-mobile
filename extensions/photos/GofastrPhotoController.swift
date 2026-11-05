@@ -4,6 +4,26 @@ import AVFoundation
 import ImageIO
 import UniformTypeIdentifiers
 
+enum GofastrPhotoExtension: MobileFileExtensionFactory {
+    static let name = "gofastr.photos/v1"
+
+    static func capabilities() -> [String: String] {
+        ["photos/v1": "available", "camera/v1": MobilePhotoPlatform.cameraAvailable() ? "available" : "unavailable"]
+    }
+
+    static func valid(_ operation: MobileFileExtension) -> Bool {
+        guard operation.name == name, let photo = try? JSONDecoder().decode(MobilePhoto.self, from: Data(operation.payload.utf8)) else { return false }
+        return photo.isValid
+    }
+
+    static func make(_ operation: MobileFileExtension, identifier: String, source: UIViewController,
+                     focus: MobileForegroundFocus, queue: DispatchQueue,
+                     respond: @escaping (MobileFileResult) -> Void) -> MobileForegroundTask? {
+        guard valid(operation), let photo = try? JSONDecoder().decode(MobilePhoto.self, from: Data(operation.payload.utf8)) else { return nil }
+        return MobilePhotoTask(photo, identifier: identifier, source: source, focus: focus, queue: queue, respond: respond)
+    }
+}
+
 enum MobilePhotoPlatform {
     static func cameraAvailable(in bundle: Bundle = .main) -> Bool {
         precondition(Thread.isMainThread)

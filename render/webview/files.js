@@ -5,6 +5,23 @@
   let current;
   let sequence = 0;
 
+  const definitions = () => window.__gofastr_file_extension_definitions || [];
+  const extensionCapabilities = () => Object.assign({}, ...definitions().map(adapter => adapter.capabilities()));
+  const prepare = (files) => {
+    const operation = files?.extension || (files?.photo ? { name: 'gofastr.photos/v1', payload: JSON.stringify(files.photo) } : null);
+    if (!operation || typeof operation.name !== 'string' || typeof operation.payload !== 'string' ||
+        operation.payload.length > 8192 || typeof TextEncoder !== 'function' || new TextEncoder().encode(operation.payload).length > 8192) return null;
+    const adapter = definitions().find(candidate => candidate.name === operation.name);
+    if (!adapter) return null;
+    try {
+      const prepared = adapter.prepare(JSON.parse(operation.payload));
+      if (!prepared || !/^[a-z][a-z0-9-]{0,31}$/.test(prepared.kind) ||
+          !['title', 'hint', 'label', 'progress'].every(key => typeof prepared[key] === 'string' && prepared[key].length <= 2048) ||
+          !['supported', 'job', 'normalize'].every(key => typeof prepared[key] === 'function')) return null;
+      return prepared;
+    } catch (_) { return null; }
+  };
+
   const element = (tag, text, attributes = {}) => {
     const node = document.createElement(tag);
     if (text) node.textContent = text;
@@ -112,14 +129,18 @@
     const selected = view.input.files;
     if (!selected?.length) { await cancel(view); return; }
     if (selected.length !== 1) { await submit(view, { status: 'denied' }); return; }
-    const photos = window.__gofastr_photos;
-    if (!photos?.supported()) { await submit(view, { status: 'unsupported' }); return; }
-    const operation = photos.job();
+    const adapter = view.extension;
+    if (!adapter?.supported()) { await submit(view, { status: 'unsupported' }); return; }
+    let operation;
+    try {
+      operation = adapter.job();
+      if (typeof operation?.cancel !== 'function') throw new Error('Invalid acquisition job.');
+    } catch (error) { await submit(view, outcome(error)); return; }
     view.photoJob = operation;
     lock(view, true);
-    feedback(view, 'Preparing a bounded JPEG photo…');
+    feedback(view, adapter.progress);
     let result;
-    try { result = { status: 'completed', file: await photos.normalize(selected[0], view.files.photo, operation) }; }
+    try { result = { status: 'completed', file: await adapter.normalize(selected[0], operation) }; }
     catch (error) { result = outcome(error); }
     if (current !== view || view.photoJob !== operation || !view.root.isConnected) return;
     view.photoJob = null;
@@ -182,11 +203,9 @@
   };
   const valid = (files) => {
     if (!files || typeof files.id !== 'string' || !files.id) return false;
-    const operations = [files.pick, files.export, files.photo].filter((operation) => operation !== undefined && operation !== null);
+    const operations = [files.pick, files.export, files.photo, files.extension].filter((operation) => operation !== undefined && operation !== null);
     if (operations.length !== 1 || typeof operations[0] !== 'object' || Array.isArray(operations[0])) return false;
-    if (files.photo) return typeof files.photo.title === 'string' && !!files.photo.title && ['library', 'camera'].includes(files.photo.source) &&
-      Number.isSafeInteger(files.photo.maxBytes) && files.photo.maxBytes > 0 && files.photo.maxBytes <= maximum &&
-      Number.isSafeInteger(files.photo.maxDimension) && files.photo.maxDimension > 0 && files.photo.maxDimension <= 2048;
+    if (files.photo || files.extension) return !!prepare(files);
     if (files.pick) return typeof files.pick.title === 'string' && !!files.pick.title && Number.isSafeInteger(files.pick.maxBytes) &&
       files.pick.maxBytes > 0 && files.pick.maxBytes <= maximum && (files.pick.extensions === undefined ||
         (Array.isArray(files.pick.extensions) && files.pick.extensions.length <= 16 && files.pick.extensions.every((extension) =>
@@ -198,33 +217,33 @@
     if (!root.isConnected) return;
     if (current || window.__gofastr_presentations?.has() || window.__gofastr_services?.has()) throw new Error('Finish the open modal task first.');
     if (typeof fileId !== 'string' || !fileId) throw new Error('The file task has no issued identity.');
+    const adapter = prepare(files);
     const prefix = 'gfw-file-' + ++sequence;
-    const dialog = element('dialog', '', { 'data-gfw-file': files?.photo ? 'photo' : files?.pick ? 'pick' : 'export', 'data-gfw-file-id': fileId,
+    const dialog = element('dialog', '', { 'data-gfw-file': adapter?.kind || (files?.pick ? 'pick' : 'export'), 'data-gfw-file-id': fileId,
       role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': prefix + '-title', 'aria-describedby': prefix + '-hint' });
-    if (['library', 'camera'].includes(files?.photo?.source)) dialog.setAttribute('data-gfw-photo-source', files.photo.source);
-    const heading = element('h2', files?.photo?.title || files?.pick?.title || 'Export file', { id: prefix + '-title', tabindex: '-1' });
-    const hint = element('p', files?.photo ? (files.photo.source === 'camera' ?
-      'This browser chooser may offer a camera. It does not guarantee camera capture or permission. Selected JPEG or PNG images are reencoded without source metadata.' :
-      'Choose one JPEG or PNG image. It is resized and reencoded as JPEG without source metadata.') : files?.pick ? 'Choose one file. Only the selected file is read, up to the requested limit.' :
-      'Download initiates a browser download; this WebView cannot confirm an external disk save.', { id: prefix + '-hint', class: 'gfw-file-hint' });
-    const view = { root, dialog, heading, opener, files, respond, busy: false, sent: false, url: null };
+    if (adapter?.source) dialog.setAttribute('data-gfw-photo-source', adapter.source);
+    const heading = element('h2', adapter?.title || files?.pick?.title || 'Export file', { id: prefix + '-title', tabindex: '-1' });
+    const hint = element('p', adapter?.hint || (files?.pick ? 'Choose one file. Only the selected file is read, up to the requested limit.' :
+      'Download initiates a browser download; this WebView cannot confirm an external disk save.'), { id: prefix + '-hint', class: 'gfw-file-hint' });
+    const view = { root, dialog, heading, opener, files, extension: adapter, respond, busy: false, sent: false, url: null };
     const validRequest = valid(files);
     const supported = validRequest && typeof Blob === 'function' && typeof TextEncoder === 'function' &&
-      typeof btoa === 'function' && typeof atob === 'function' && (files.photo ? window.__gofastr_photos?.supported() &&
+      typeof btoa === 'function' && typeof atob === 'function' && (adapter ? adapter.supported() &&
         element('input', '', { type: 'file' }).type === 'file' : files.pick ?
         typeof Blob.prototype.arrayBuffer === 'function' && element('input', '', { type: 'file' }).type === 'file' :
         typeof URL.createObjectURL === 'function' && typeof URL.revokeObjectURL === 'function' && 'download' in element('a'));
     dialog.append(heading, hint);
     const actions = element('div', '', { class: 'gfw-file-actions' });
-    if (supported && (files.pick || files.photo)) {
-      const label = element('label', files.photo ? files.photo.source === 'camera' ? 'Open browser photo chooser (may offer camera)' : 'Choose photo' : 'Choose file', { for: prefix + '-input' });
+    if (supported && (files.pick || adapter)) {
+      const label = element('label', adapter?.label || 'Choose file', { for: prefix + '-input' });
       view.input = element('input', '', { type: 'file', id: prefix + '-input', 'data-gfw-file-input': '', 'aria-describedby': hint.id });
-      if (files.photo) {
-        view.input.setAttribute('data-gfw-photo-source', files.photo.source);
-        view.input.setAttribute('accept', 'image/*');
-        if (files.photo.source === 'camera') view.input.setAttribute('capture', 'environment');
+      if (adapter) {
+        if (adapter.source) view.input.setAttribute('data-gfw-photo-source', adapter.source);
+        for (const [name, value] of Object.entries(adapter.attributes || {})) {
+          if (['accept', 'capture'].includes(name)) view.input.setAttribute(name, value);
+        }
       } else if (files.pick.extensions?.length) view.input.setAttribute('accept', files.pick.extensions.join(','));
-      view.input.addEventListener('change', () => void (files.photo ? photo(view) : pick(view)));
+      view.input.addEventListener('change', () => void (adapter ? photo(view) : pick(view)));
       view.input.addEventListener('cancel', () => void cancel(view));
       dialog.append(label, view.input);
     } else {
@@ -278,6 +297,6 @@
     if (current && event.cancelable && !(current.downloading && current.url && event.destination?.url === current.url)) event.preventDefault();
   });
   window.__gofastr_files = { open, close, has: (root) => !!current && (!root || current.root === root), capability: 'fallback',
-    photoCapability: () => window.__gofastr_photos?.supported() && typeof TextEncoder === 'function' && typeof atob === 'function' ? 'fallback' : 'unavailable' };
+    capabilities: extensionCapabilities, photoCapability: () => extensionCapabilities()['photos/v1'] || 'unavailable' };
   if (window.__gofastr) (window.__gofastr.loadedModules ||= {})['gfm-webview-files'] = true;
 })();

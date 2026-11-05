@@ -144,7 +144,9 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 			reply.Error = commandFailure("protocol", "A renderer advertisement is required.")
 			return reply
 		}
-		contract, err := Negotiate(*command.Hello)
+		contract, err := negotiate(*command.Hello, func(capability Capability) bool {
+			return knownCapability(capability) || runtime.app.extensions.Allows(string(capability))
+		})
 		if err != nil {
 			reply.Error = commandFailure("protocol", err.Error())
 			return reply

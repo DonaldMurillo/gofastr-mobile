@@ -11,8 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/DonaldMurillo/gofastr-native/device/files"
-	"github.com/DonaldMurillo/gofastr-native/device/photos"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/extensions/photos"
 	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
 
@@ -187,9 +187,13 @@ func requestPhoto(service *notes.Service, store *files.Store, source photos.Sour
 		if source == photos.Camera {
 			identifier, title = "camera", "Take photo"
 		}
-		return nativeui.Result{Files: &nativeui.FileRequest{ID: identifier, Commit: true, Photo: &photos.Request{
+		operation, err := photos.Acquire(photos.Request{
 			Title: title, Source: source, MaxBytes: files.MaxBytes, MaxDimension: photos.MaxDimension,
-		}}}, nil
+		})
+		if err != nil {
+			return nativeui.Result{}, err
+		}
+		return nativeui.Result{Files: &nativeui.FileRequest{ID: identifier, Commit: true, Extension: operation}}, nil
 	}
 }
 

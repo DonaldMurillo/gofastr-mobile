@@ -9,7 +9,35 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/fstest"
+
+	"github.com/DonaldMurillo/gofastr-native/extensions/photos"
 )
+
+func photoTestSources(t *testing.T) fstest.MapFS {
+	t.Helper()
+	library := fstest.MapFS{}
+	entries, err := Sources.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		content, err := Sources.ReadFile(entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		library[entry.Name()] = &fstest.MapFile{Data: content}
+	}
+	definition := photos.Definition()
+	for _, name := range definition.Manifest.IOS.Sources {
+		content, err := definition.Assets.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		library[name] = &fstest.MapFile{Data: content}
+	}
+	return library
+}
 
 func TestPhotosWireAndImageProcessing(t *testing.T) {
 	if runtime.GOOS != "darwin" {
@@ -21,7 +49,7 @@ func TestPhotosWireAndImageProcessing(t *testing.T) {
 	directory := t.TempDir()
 	arguments := []string{"--sdk", "macosx", "swiftc", "-parse-as-library", "-module-cache-path", filepath.Join(directory, "module-cache")}
 	for _, name := range []string{"GofastrFiles.swift", "GofastrPhotos.swift"} {
-		source, err := Sources.ReadFile(name)
+		source, err := photoTestSources(t).ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +97,7 @@ func TestPhotosUIKitTypechecks(t *testing.T) {
 	directory := t.TempDir()
 	arguments := []string{"--sdk", "iphonesimulator", "swiftc", "-parse-as-library", "-typecheck", "-module-name", "GofastrPhotoChecks",
 		"-target", architecture + "-apple-ios16.0-simulator", "-sdk", strings.TrimSpace(string(sdk)), "-module-cache-path", filepath.Join(directory, "module-cache")}
-	entries, err := Sources.ReadDir(".")
+	entries, err := photoTestSources(t).ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +105,7 @@ func TestPhotosUIKitTypechecks(t *testing.T) {
 		if !strings.HasSuffix(entry.Name(), ".swift") {
 			continue
 		}
-		source, err := Sources.ReadFile(entry.Name())
+		source, err := photoTestSources(t).ReadFile(entry.Name())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +123,7 @@ func TestPhotosUIKitTypechecks(t *testing.T) {
 func TestPhotosAcquisitionContract(t *testing.T) {
 	read := func(name string) string {
 		t.Helper()
-		source, err := Sources.ReadFile(name)
+		source, err := photoTestSources(t).ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,7 +151,7 @@ func TestPhotosAcquisitionContract(t *testing.T) {
 		}
 	}
 	foreground := read("GofastrForeground.swift")
-	for _, required := range []string{"private var active: MobileForegroundTask?", "if model.isValid, let photo = model.photo", "task = MobilePhotoTask(", "task = MobileFileTask(", "active = task"} {
+	for _, required := range []string{"private var active: MobileForegroundTask?", "if let operation = model.operation", "MobileFileExtensions.make(", "task = MobileFileTask(", "active = task"} {
 		if !strings.Contains(foreground, required) {
 			t.Errorf("photos must reuse the existing foreground factory: %s", required)
 		}
@@ -135,12 +163,12 @@ func TestPhotosAcquisitionContract(t *testing.T) {
 		t.Fatal("missing hello boundary")
 	}
 	hello := native[start:end]
-	for _, required := range []string{`"photos/v1": "available"`, `"camera/v1": MobilePhotoPlatform.cameraAvailable() ? "available" : "unavailable"`, "guard Thread.isMainThread else", "DispatchQueue.main.async"} {
+	for _, required := range []string{"MobileFileExtensions.capabilities()", "guard Thread.isMainThread else", "DispatchQueue.main.async"} {
 		if !strings.Contains(hello, required) {
 			t.Errorf("missing main-thread photo capability negotiation: %s", required)
 		}
 	}
-	if strings.Contains(hello, "requestAccess") || strings.Index(hello, "guard Thread.isMainThread") > strings.Index(hello, "MobilePhotoPlatform.cameraAvailable()") {
+	if strings.Contains(hello, "requestAccess") || strings.Contains(hello, "MobilePhotoPlatform") || strings.Index(hello, "guard Thread.isMainThread") > strings.Index(hello, "MobileFileExtensions.capabilities()") {
 		t.Error("hello must check hardware/purpose on main without requesting permission")
 	}
 }
