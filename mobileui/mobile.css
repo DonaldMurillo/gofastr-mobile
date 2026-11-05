@@ -17,7 +17,7 @@
 }
 .gfm-screen *, .gfm-screen *::before, .gfm-screen *::after { box-sizing: border-box; }
 .gfm-screen a { color: inherit; text-decoration: none; }
-.gfm-screen button, .gfm-screen input, .gfm-screen textarea { font: inherit; }
+.gfm-screen button, .gfm-screen input, .gfm-screen select, .gfm-screen textarea { font: inherit; }
 .gfm-screen button { cursor: pointer; }
 .gfm-screen svg { flex: 0 0 auto; width: 22px; height: 22px; }
 .gfm-screen :is(a, button, input, textarea):focus-visible { outline: 3px solid var(--color-primary); outline-offset: 3px; }
@@ -38,9 +38,13 @@
 .gfm-nav-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: .9375rem; font-weight: 600; }
 .gfm-nav-action, .gfm-back { display: inline-flex; align-items: center; justify-content: center; gap: .25rem; min-width: var(--gfm-target); min-height: var(--gfm-target); color: var(--color-primary) !important; border: 0; background: transparent; }
 .gfm-nav-action { flex: 0 0 auto; padding-inline: 8px; font-weight: 600; }
-[data-gfm-screen="list"][data-gfm-platform="ios"] .gfm-nav-action span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.gfm-nav-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; }
+.gfm-nav-action:has(svg) span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .gfm-back { padding-inline: .25rem; }
 .gfm-back svg { width: 1.125rem; }
+@media (max-width: 24rem) {
+  .gfm-back span { display: none; }
+}
 .gfm-heading { padding: .125rem var(--gfm-gutter) 1.5rem; }
 .gfm-heading h1 { margin: 0; font-size: var(--gfm-title); font-weight: 750; line-height: 1.15; letter-spacing: -.035em; }
 .gfm-heading p { margin: .5rem 0 0; font-size: .875rem; color: var(--color-text-muted); }
@@ -93,6 +97,7 @@
 [data-gfm-platform="android"] .gfm-nav-title { text-align: start; font-size: 1.125rem; font-weight: 500; }
 [data-gfm-platform="android"] .gfm-back span { display: none; }
 [data-gfm-platform="android"] .gfm-nav-action { background: var(--color-primary); color: var(--color-primary-fg) !important; border-radius: 2rem; min-height: var(--gfm-target); padding-inline: 1rem; font-size: .875rem; }
+[data-gfm-platform="android"] .gfm-nav-action:has(svg) { background: transparent; color: var(--color-primary) !important; padding-inline: .5rem; }
 [data-gfm-platform="android"][data-gfm-screen="editor"] { background: var(--color-background); }
 [data-gfm-platform="android"][data-gfm-screen="editor"] .gfm-nav { background: var(--color-background); border-bottom: 0; }
 [data-gfm-platform="android"] .gfm-document-title { font-weight: 500 !important; }

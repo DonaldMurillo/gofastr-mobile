@@ -58,7 +58,7 @@ type BridgeReply struct {
 // never fails: a malformed message or a failed request comes back as a
 // reply carrying Error, so the page's pending fetch always settles.
 func (h *Host) Bridge(msg string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), bridgeTimeout)
+	ctx, cancel := context.WithTimeout(h.bridgeContext, bridgeTimeout)
 	defer cancel()
 	return string(mustJSON(h.bridge(ctx, msg)))
 }

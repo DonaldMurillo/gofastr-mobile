@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	hostios "github.com/DonaldMurillo/gofastr-mobile/mobilehost/ios"
+	renderios "github.com/DonaldMurillo/gofastr-mobile/render/ios"
 )
 
 // The iOS simulator build never touches an Xcode project. Like
@@ -47,14 +51,9 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 			return "", err
 		}
 	}
-	src := filepath.Join(work, "ios", "App.swift")
 	plist := filepath.Join(work, "ios", "Info.plist")
-	if err := r.do("generate the Swift host and Info.plist", func() error {
-		if err := writeRendered("templates/ios/App.swift.tmpl", src, a); err != nil {
-			return err
-		}
-		return writeRendered("templates/ios/Info.plist.tmpl", plist, a)
-	}); err != nil {
+	sources, err := prepareIOSHost(r, a, filepath.Join(work, "ios"))
+	if err != nil {
 		return "", err
 	}
 	appDir := filepath.Join(out, a.Exe+".app")
@@ -67,8 +66,7 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 		return "", err
 	}
 	target := simArch() + "-apple-ios" + a.MinOS + "-simulator"
-	if err := r.run("compile the Swift host and link the Go framework",
-		"xcrun", "--sdk", "iphonesimulator", "swiftc",
+	args := []string{"--sdk", "iphonesimulator", "swiftc",
 		"-parse-as-library", "-O",
 		// swiftc names the module after -o, and the executable shares the
 		// Go framework's name (Notesmobile): App.swift would then be part of
@@ -80,7 +78,9 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 		// certificates through these; a static framework does not carry
 		// its link flags, so the final link names them.
 		"-framework", "Foundation", "-framework", "Security", "-framework", "CoreFoundation", "-lresolv",
-		"-o", filepath.Join(appDir, a.Exe), src); err != nil {
+		"-o", filepath.Join(appDir, a.Exe)}
+	args = append(args, sources...)
+	if err := r.run("compile the Swift host and link the Go framework", "xcrun", args...); err != nil {
 		return "", err
 	}
 	if err := r.do("copy Info.plist into the bundle", func() error {
@@ -96,6 +96,60 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 		return "", err
 	}
 	return appDir, nil
+}
+
+func prepareIOSHost(r *runner, a app, directory string) ([]string, error) {
+	src := filepath.Join(directory, "App.swift")
+	if err := r.do("generate the Swift host and Info.plist", func() error {
+		if err := writeRendered("templates/ios/App.swift.tmpl", src, a); err != nil {
+			return err
+		}
+		return writeRendered("templates/ios/Info.plist.tmpl", filepath.Join(directory, "Info.plist"), a)
+	}); err != nil {
+		return nil, err
+	}
+	sources := []string{src}
+	if a.HostTemplate != "" {
+		return sources, nil
+	}
+	rendererSources, err := copyIOSLibrary(r, renderios.Sources, filepath.Join(directory, "renderer"), "UIKit renderer")
+	if err != nil {
+		return nil, err
+	}
+	sources = append(sources, rendererSources...)
+	if a.Renderer != "native" {
+		hostSources, err := copyIOSLibrary(r, hostios.Sources, filepath.Join(directory, "host"), "WebView service adapter")
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, hostSources...)
+	}
+	return sources, nil
+}
+
+func copyIOSLibrary(r *runner, library fs.ReadFileFS, directory, label string) ([]string, error) {
+	entries, err := fs.ReadDir(library, ".")
+	if err != nil {
+		return nil, err
+	}
+	var sources []string
+	for _, entry := range entries {
+		destination := filepath.Join(directory, entry.Name())
+		if err := r.do("copy bundled "+label+" "+entry.Name(), func() error {
+			content, err := library.ReadFile(entry.Name())
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+				return err
+			}
+			return writeOwnerOnly(destination, content)
+		}); err != nil {
+			return nil, err
+		}
+		sources = append(sources, destination)
+	}
+	return sources, nil
 }
 
 func runIOS(r *runner, a app, appDir string, opts runOpts) error {
@@ -127,7 +181,7 @@ func runIOS(r *runner, a app, appDir string, opts runOpts) error {
 		}
 	}
 	fmt.Fprintf(r.out, "\nRunning on simulator %s.\n  Logs:      xcrun simctl spawn %s log stream --predicate 'process == \"%s\"'\n", udid, udid, a.Exe)
-	if a.HostTemplate == "" {
+	if a.HostTemplate == "" && a.Renderer != "native" {
 		fmt.Fprintf(r.out, "  Inspector: Safari > Develop > Simulator > %s\n", a.Name)
 	}
 	return nil

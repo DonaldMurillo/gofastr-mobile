@@ -3,7 +3,7 @@
 // types gomobile can export cross this boundary: strings, byte slices,
 // ints, errors, and pointers to this package's structs. A scaffold would
 // generate this file per app; everything app-specific is the one
-// notesapp.Build call.
+// notesapp.BuildScreensWithPlatform call.
 package notesmobile
 
 import (
@@ -41,7 +41,7 @@ func Start(dataDir, origin string) error {
 	if runtime.GOOS == "android" {
 		platform = mobileui.Android
 	}
-	_, h, err := notesapp.BuildWithPlatform(dataDir, origin, platform)
+	_, h, err := notesapp.BuildScreensWithPlatform(dataDir, origin, platform)
 	if err != nil {
 		return err
 	}

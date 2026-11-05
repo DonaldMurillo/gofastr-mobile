@@ -5,9 +5,11 @@ in-process and answers the WebView's requests over an in-memory listener:
 no socket, no port, no loopback origin. This is early work, not a supported
 feature yet.
 
-The Notes example also has an experimental **real UIKit presentation**: shared
-Go behavior, native controls, no WebView for its screens. See
-[Native Notes](docs/native-presentation.md).
+The Notes example also has experimental **shared Go mobile screens**:
+application screens and actions are Go `nativeui` definitions; the library renders
+them as real UIKit controls or mobile WebView screens. Apps write no Swift,
+HTML, CSS, or screen templates. See [shared mobile screens](docs/shared-mobile-screens.md)
+and [Native Notes](docs/native-presentation.md).
 
 The module builds on gofastr's public API only. Go's `internal/` rule goes by
 import path, so this repository sees exactly what any other app sees. When it
@@ -42,35 +44,86 @@ point it at the checkout. `go.work` is gitignored.
 | `examples/notes/notesweb/` | Handwritten task screens composed from `mobileui`, plus the HTTP save adapter. |
 | `examples/notes/notes/`, `notesstore/` | Typed application behavior and a temporary scoped-CRUD repository adapter. No presentation code. |
 | `examples/notes/notesterminal/` | A second, line-oriented presentation of the same service, without HTML or browser dependencies. Run with `go run ./examples/notes/cmd/notes-terminal --data /absolute/directory`. |
-| `examples/notes/notesmobile/` | The surface `gomobile bind` exports: `Start`, `Stop`, `Handle`, `Open`, `Bridge`, with strings, bytes and ints only. A scaffold would generate this file. |
-| `examples/notes/notesnative/` | A typed native binding: lifecycle, list/get/save commands, data snapshots, and centrally supplied installation identity. No HTTP screen contract. |
-| `examples/notes/native/ios/` | Caller-owned UIKit Notes screens: navigation, search, editing, keyboard avoidance, drafts, sharing, and native sheets. |
+| `examples/notes/notesmobile/` | Thin WebView binding for shared Go mobile screens: `Start`, `Stop`, `Handle`, `Open`, `Bridge`, with strings, bytes and ints only. |
+| `nativeui/` | External mobile screen/action definitions in Go, local routing, and the gomobile wire envelope. |
+| `examples/notes/notesscreens/` | One Notes screen/action package, written only in Go using `nativeui`, consumed by UIKit and WebView. |
+| `examples/notes/notesnative/` | Thin native binding: lifecycle, screen rendering/action dispatch, compatibility data commands, and centrally supplied installation identity. |
 | `cmd/gofastr-mobile/` | The CLI that builds the phone app and runs it on the iOS simulator or an Android emulator. No Xcode project, no Gradle. |
-| `cmd/gofastr-mobile/templates/` | The generated native shells: `App.swift` + `Info.plist` (WKURLSchemeHandler on `gofastr://app`, a `gofastr` script message handler) and `MainActivity.java` + `AndroidManifest.xml` (`shouldInterceptRequest` on `https://appassets.androidplatform.net`, a WebMessageChannel). |
+| `render/ios/` | Ordinary, binding-independent UIKit renderer source, copied verbatim and compiled alongside the generated app entry. |
+| `render/webview/` | Generic adapter from the same Go mobile definitions to `mobileui` components, actions, and GoFastr navigation. |
+| `cmd/gofastr-mobile/templates/` | Library-owned WebView shells and minimal native binding/bootstrap glue, plist, and manifest. Apps only supply Go screens. |
 | `sim/` | A Chromium set up as a phone WebView (390x844 @3x, touch, phone UA). Every request is intercepted through the DevTools Fetch domain and answered by `mobilehost`; a MessagePort stands in for the native channel. |
 
 ## External presentation prototype
 
-The notes example now uses an external mobile-web screen family, not desktop
-entityui screens at phone width. iOS and Android presentation modes share typed
-application behavior, not a universal widget tree. Both support light/dark,
-search, create/edit, explicit saves, validation, and session-only drafts.
-The terminal adapter demonstrates the same behavior without rendering HTML.
+The mobile Notes bindings now consume one Go screen/action package,
+`notesscreens`, through either UIKit or the generic WebView renderer. The latter
+uses the external `mobileui` design system with iOS/Android modes, not desktop
+entityui screens at phone width. Both renderers support list/editor/About,
+search, create/edit, explicit saves, validation, and draft recovery, with
+documented platform differences.
 
-The UIKit prototype takes the same boundary further with actual native controls
-and direct Go commands. It is selected by `--host-template`, not by changing
-GoFastr's web design system. No GoFastr code or production dependencies changed.
-The terminal and UIKit demos still share the web-oriented app bootstrap; this
-is not yet a host-neutral rendering runtime.
+Notes is the single showcase application. Its **Behaviors** screen adds
+Go-authored alerts, confirmations, menus, dialogs, sheets, and single/multiple
+selection through both renderers. Native/WebView packages are thin launch
+adapters, not separate example products. See [Go presentation behaviors](docs/presentation-behaviors.md).
+
+The same application also has **Files**: import text/Markdown notes, export a
+note's current buffer, and add/export/remove private attachments on saved notes.
+These use [typed Go file services](docs/files-services.md), with a 1 MiB transfer
+limit, native iOS document pickers, and an explicit mobile-WebView fallback.
+Saved-note attachments also offer **Choose photo** and **Take photo** through
+[typed photo services](docs/photos-services.md), normalizing to bounded JPEGs
+without original EXIF/GPS metadata. Native camera acceptance requires a real
+device; the WebView path is an explicitly disclosed chooser fallback.
+Photos display inside the note and open a larger attachment preview. Both
+renderers share the same Go [image preview definitions](docs/image-previews.md).
+
+Notes also exposes typed reminder scheduling/status/cancellation, rich note and
+attachment sharing, explicit clipboard writes, and private voice recordings.
+Collections now page in the owner-scoped repository beyond 200 records and
+watch confirmed changes from the shared service. See [device services and
+acceptance limits](docs/mobile-services.md). Native Android remains deferred.
+
+The same Notes app now exercises [mobile components](docs/mobile-components.md):
+typed toggles/selects/date/time, filters and accumulated Load more, stable-ID
+multi-selection and bulk actions with undo, Notes/Files/Settings tabs, and row
+swipes with labelled menu alternatives. UIKit retains a navigation stack per tab;
+WebView retains each tab's last route/scroll/focus within GoFastr's shared history.
+The [mobile document design](docs/mobile-design.md) keeps writing first, puts
+photos/files inside the note, and gives the Files tab a real attachment library
+with readable metadata and reusable previews. Styling stays in renderer libraries;
+the example app still authors only Go screen definitions.
+Reminder fields are metadata; scheduling is an explicit device-service action.
+Notes paging is repository-backed; the Files library currently covers the 200
+most recent active notes. Optional native iOS custom links use `--url-scheme notes-demo`.
+
+Existing whole-GoFastr-web-app hosting remains independent and supported.
+`notesweb` preserves that handwritten web presentation; the terminal adapter
+reuses the same typed service without implementing the mobile screen contract.
+
+The native prototype uses Go-authored `nativeui` screens and a reusable, bundled
+UIKit renderer selected by `--renderer native`. Apps do not write Swift templates
+or wire JSON. No GoFastr code or production dependencies changed.
+UIKit now composes services/installation data without mounting unused web
+screens. It still uses in-memory `App.Serve` for the complete framework lifecycle;
+listener-free startup is not claimed. Shared editor policy, durable draft storage,
+capabilities and observed effect receipts live in [mobile runtime services](docs/mobile-runtime.md).
 See [the architecture, public APIs, validation, and limitations](docs/presentation-prototype.md)
 and [the native host contract](docs/native-presentation.md), plus
 [implementation notes](docs/agent-notes.md).
+
+The [shared-screen implementation](docs/shared-mobile-screens.md) documents the
+working APIs and limits. The [mobile presentation roadmap](docs/mobile-roadmap.md)
+tracks remaining shared headless task behaviors, async correctness, and explicit
+platform capabilities. Sharing definitions is not yet behavior parity.
 
 ## Run the tests
 
 ```bash
 go test ./...
 SIM_SHOTS=/tmp/shots go test ./sim/ -run TestPhoneWebView -v
+SIM_SHOTS=/tmp/shared-shots go test ./sim/ -run TestSharedMobileScreensWebView -v
 ```
 
 `TestPhoneWebView` runs twice: once as iOS and once with Android's limits
@@ -103,7 +156,7 @@ Real UIKit Notes (separate app and data, no WebView screens):
 ```bash
 go run ./cmd/gofastr-mobile run --platform ios-sim \
   --pkg ./examples/notes/notesnative \
-  --host-template ./examples/notes/native/ios/App.swift.tmpl \
+  --renderer native \
   --id dev.gofastr.notesnative --name 'Native Notes' --out dist/mobile/ios-native
 ```
 
@@ -118,9 +171,15 @@ go run ./cmd/gofastr-mobile run --platform android-emu --pkg ./examples/notes/no
 prints every step without running any. `--device` picks a simulator (name or
 UDID), an adb serial or an AVD. `--id` and `--name` set the bundle id and the
 display name. Output lands in `dist/mobile/<platform>/`.
-`--host-template` optionally selects caller-owned Swift/Java host source;
-without it the existing WebView hosts remain the default. The template and
-bind package must agree; see [the contract and limits](docs/native-presentation.md#caller-owned-host-templates).
+`--renderer native` selects the bundled Go-definition-driven UIKit renderer;
+native Android is not implemented. Without it the WebView hosts remain the
+default. `--host-template` remains an experimental custom-host escape hatch,
+not the application screen-authoring model; it cannot be combined with native
+renderer selection. See [the contract and limits](docs/native-presentation.md).
+`--microphone-usage 'Record a voice note to attach privately.'` explicitly adds
+the iOS microphone purpose string; recording is unavailable when it is omitted
+or empty. The default iOS WebView host also bundles the reusable native-service
+adapter; custom host templates must opt into that library integration themselves.
 
 | iOS simulator | Android emulator |
 |---|---|
@@ -169,6 +228,15 @@ interception path and `Open`, which hands chunks over as they arrive.
 
 ## What has been verified
 
+- **Shared Go definitions in real WKWebView (iOS 26.5 simulator).** Fresh bind,
+  build, install, and launch; New, invalid/corrected save, retained validation
+  fields, reopen, search, and About dismissal use `notesscreens` over the bridge.
+  A window marker survives the flow, proving same-document client navigation.
+- **Shared-screen browser acceptance, both modes.** Real in-memory host/bridge:
+  validation and persistence, editable pending saves/caret retention, canonical
+  create identity without duplicate records, durable Go draft reload, unsaved
+  share fallback, keep/discard drafts, search, About, light/dark, and 320px/200% text. The independent
+  legacy web presentation still has its existing regression coverage.
 - **Real UIKit Notes (iOS 26.5 simulator).** Native list/search, validation,
   create/save/reopen, durable local draft restoration, dirty Back, system
   keyboard avoidance, user-initiated share sheet, and medium/large native sheet.
@@ -214,13 +282,25 @@ interception path and `Open`, which hands chunks over as they arrive.
   `mobileui.Theme(platform)`; a scaffold must also choose its presentation.
 - **The framework's 404 page has no styles.** On the phone it renders as bare
   HTML.
-- **Host-neutral lifecycle is not extracted.** The Notes terminal and UIKit
-  renderers share behavior but still reuse the current web-oriented bootstrap. See
-  [the prototype's remaining seams](docs/presentation-prototype.md#what-this-suggests-for-gofastr).
+- **Listener-free lifecycle is not extracted.** UIKit no longer mounts web
+  screens, but its complete lifecycle still runs through in-memory Serve. See
+  [Gate A versus Gate B](docs/mobile-lifecycle.md).
+- **Some async acceptance gaps remain.** Browser/OS history Back is not yet a
+  durable asynchronous leave barrier; keyed list updates, full IME/accessibility
+  fault runs and crash-safe mutation reconciliation remain work. Explicit app
+  Back/links and UIKit Keep Draft wait for Go checkpoint acknowledgement.
 
 ## Next steps
 
-1. Run the Android build on an emulator.
-2. A `gofastr mobile` scaffold that generates the bind package.
-3. Device signing for iOS.
-4. Re-pin `go.mod` to the first gofastr release that carries the seams.
+Follow the [milestones and acceptance gates](docs/mobile-roadmap.md#build-order-and-acceptance-gates):
+
+1. Finish the remaining M2 Back/IME/accessibility gates over the shared editor/runtime.
+2. Propose a complete public listener-free lifecycle seam; do not copy framework startup.
+3. Resume Android native only when a runnable environment is available; preserve WebView support.
+4. Expand task-shaped components/capabilities, then extensions, scaffolding, device
+   signing, and measured optimization. Re-pin to framework releases as required
+   public seams become available.
+
+The [component slice](docs/mobile-components.md) implements the first controls,
+collection, tab, and swipe contracts; uncapped repository paging, richer sheets,
+and complete device/accessibility acceptance remain roadmap work.

@@ -1,150 +1,188 @@
-# Native Notes presentation
+# Go-defined native presentation
 
-This prototype uses **real UIKit controls**, not HTML styled to resemble them.
-The native presenter calls a typed Go binding directly. It never creates a
-WebView, requests an HTML screen, or interprets a shared widget tree. GoFastr
-remains web-first; no GoFastr source changes or production dependencies are
-required.
+Application authors write **GoFastr-style Go screens using gofastr-mobile definitions**.
+They do not write Swift, Java, HTML, CSS, or wire JSON. GoFastr remains web-first;
+this experiment is an external mobile presentation module, not a new core widget
+system. There are no GoFastr source changes or new production dependencies.
 
-## Ownership
+The original handwritten UIKit proof is preserved at checkpoint **82e936f**.
+Its application-owned Swift file has been removed from the current design.
+
+The same Go mobile definitions now also render through the generic
+[WebView adapter](shared-mobile-screens.md). This document describes the UIKit
+path; shared headless behaviors and stronger async guarantees remain in the
+[mobile presentation roadmap](mobile-roadmap.md).
+
+## Ownership and structure
 
 | Layer | Owns |
 | --- | --- |
-| `examples/notes/notes` | Typed application behavior, validation, and a repository contract |
-| `examples/notes/notesstore` | Temporary adapter to GoFastr's owner-scoped CRUD pipeline |
-| `examples/notes/notesnative` | Installation identity, lifecycle, and gomobile-compatible command/data snapshots |
-| `examples/notes/native/ios/App.swift.tmpl` | UIKit screens, navigation, drafts, native capabilities, and platform appearance |
-| `cmd/gofastr-mobile` | Binding, compiling, packaging, and launching the selected native host |
+| `nativeui/` | Go screen, list, form, field, action, draft, and navigation definitions; local route/action dispatch; versioned binding envelope |
+| `examples/notes/notesscreens/screens.go` | Notes list, create/edit, information sheet, labels, destinations, and Go action handlers |
+| `examples/notes/notesnative/` | Installation identity, lifecycle, and thin gomobile entry points |
+| `examples/notes/notes`, `notesstore/` | Shared typed behavior, validation, repository access, and owner scopes |
+| `render/ios/GofastrNative.swift` | Ordinary, reusable UIKit renderer source: navigation, input state, local draft recovery, and native capabilities |
+| `cmd/gofastr-mobile/templates/ios/NativeApp.swift.tmpl` | Minimal generated application entry and gomobile binding adaptation |
+| `cmd/gofastr-mobile/` | Selects, binds, compiles, packages, and launches the renderer |
 
-The web, terminal, and UIKit presenters share behavior and persisted Notes, not
-screen definitions. UIKit owns its native navigation stack; there is no browser
-history or parallel Go screen stack to synchronize. A future Android, desktop,
-canvas, or TUI presenter should choose its own controls and navigation instead
-of implementing a UIKit-shaped renderer interface.
+The renderer is maintained as ordinary Swift source, with no template expansion
+or application binding imports. The CLI copies it unchanged and compiles it
+alongside a tiny generated application entry. That entry injects the
+`GofastrNativeBackend` closures for `Start`, `Stop`, `Root`, `Render`, and
+`Dispatch`, plus the versioned `Command` service. Its template is build glue,
+not screen composition or behavior.
+Application authors never copy or customize either file; all supported screen
+definitions use the same renderer.
 
-**Bootstrap limitation:** `notesnative.Start` still calls `notesapp.Build` and
-starts the existing in-memory `mobilehost`. This initializes the same entity,
-database, hooks, and owner scopes, but also mounts an unused web presentation.
-Native commands do not use that HTTP transport or render its screens. This is
-not an extracted host-neutral/headless GoFastr lifecycle. That lifecycle is the
-next demonstrated upstream gap, not something to conceal behind a renderer API.
+`mobileui` remains the separate mobile-web presentation package. Desktop, canvas,
+and TUI modules need not interpret this mobile schema or implement HTML APIs.
+They can share application services and choose their own presentation definitions.
 
 ## Run
 
-On a Mac with the existing Xcode toolchain:
+On a Mac with Xcode:
 
 ```sh
 go run ./cmd/gofastr-mobile run --platform ios-sim \
-  --pkg ./examples/notes/notesnative \
-  --host-template ./examples/notes/native/ios/App.swift.tmpl \
+  --renderer native --pkg ./examples/notes/notesnative \
   --id dev.gofastr.notesnative --name 'Native Notes' \
   --out dist/mobile/ios-native
 ```
 
-The separate bundle ID keeps this app and its data apart from the WebView demo.
-Use `build` to stop after packaging or `--dry-run` to print the steps without
-writing output. `--device` selects a simulator. The CLI does not yet provision
-physical iPhones.
+No app-owned host template is required. The default renderer remains `webview`;
+`--renderer native` selects the bundled UIKit implementation. `build` packages
+without launching; `--dry-run` writes no output. Physical-device signing is not
+wired. Native Android is **not implemented**: the CLI rejects that combination
+rather than silently rendering a WebView or claiming native parity.
 
-### Caller-owned host templates
+The experimental `--host-template` escape hatch remains for compatibility with
+the checkpoint. It is not the screen-authoring model and cannot be combined with
+`--renderer native`. It replaces only the host source, leaves the generated
+plist/manifest unchanged, and requires trusted source matching its binding API.
+The caller must supply a regular file no larger than 1 MiB. Nothing is downloaded
+or interpreted as remote executable presentation code.
 
-`--host-template` is an optional build/run flag. It replaces **only** the host
-source: `App.swift` for `ios-sim`, or `MainActivity.java` for `android-emu`.
-The regular generated Info.plist/AndroidManifest and build pipeline remain in
-use. Without the flag, the existing WebView hosts and binding contract are
-unchanged.
+## Screen authoring
 
-The file must be a regular file no larger than 1 MiB; relative paths resolve
-from the current directory. It uses Go `text/template` with the CLI's existing
-application metadata, including `.Prefix` (the generated binding name), `.ID`,
-and `.Name`. The example uses `.Prefix` for imports and bound function names.
-The file is trusted native source compiled into the app, not downloaded code
-or a runtime plugin. Select a template matching the platform and `--pkg` API;
-the compiler checks that contract. There is no automatic translation between
-the default HTTP bridge API and a custom native API.
-Custom-host launch output omits WebView inspector instructions; debugging
-capabilities belong to the chosen host.
+`notesscreens.New(service)` registers routes much like a web presentation:
 
-This is deliberately a one-file prototype seam, not a general native resource,
-entitlement, dependency, or project-manifest extension system. The Java override
-uses the same CLI seam, but no native Android Notes presenter is included.
-
-## Typed command boundary
-
-`notesnative` exports `Start(dataDir)`, `Stop()`, `List(search)`, `Get(id)`, and
-`Save(id, title, body)`. `Save` creates when the ID is empty and updates otherwise.
-`Note` contains data strings; `NoteList.Count`/`Item` expose a bounded snapshot
-without JSON or a platform collection dependency. `List` currently caps results
-at 200, as does the shared service.
-
-Call startup and CRUD off the platform UI thread. The UIKit adapter runs them
-on a serial background queue and delivers results on the main queue. It ignores
-stale search responses. Go holds lifecycle locks for in-flight operations;
-`Stop` waits before shutdown. Commands use a 30-second context and shutdown a
-10-second context. The binding, not the screen, supplies installation identity.
-Validation, hooks, and authorization remain in the shared Go service/repository.
-
-## What is native
-
-- `UINavigationController` large titles, push/pop, and the clean editor's native
-  interactive Back gesture. Dirty/saving editors disable that gesture so it
-  cannot bypass the explicit draft decision.
-- An inset-grouped `UITableView`, native search/no-results, and `UIRefreshControl`.
-- A `UITextField` title and `UITextView` body, system selection/input behavior,
-  and `keyboardLayoutGuide` for the editor's available height.
-- Semantic system colors, system text styles, Dynamic Type participation,
-  accessibility labels/IDs, and a successful-save announcement.
-- A user-initiated `UIActivityViewController` share sheet and a native information
-  sheet with medium/large detents. Merely opening Share sends nothing.
-- Selection and save/error haptic calls. Simulator execution is not evidence of
-  physical haptic feel.
-
-Done is an explicit commit. Save errors preserve text; successful saves return
-to the list. Unsaved Back offers Keep Editing, Keep Draft, or Discard Changes.
-Drafts are keyed by note ID (one slot for a new note) in local `UserDefaults`
-and restore after process restart. They are convenience drafts, **not encrypted
-secret storage, database autosave, multi-account isolation, or conflict-aware
-sync**. Saving/discarding clears the applicable draft; keeping it does not
-create or update a persisted Note. The editor disables changes during a save.
-
-Presentation and application code ship in the app bundle. This slice uses local
-data only. Generated typed repositories can replace `notesstore` later without
-moving UI decisions into those repositories or introducing remote screens.
-
-## Verification and limits
-
-```sh
-go test ./...
-GOWORK=off go test ./...
-go vet ./...
+```go
+nativeui.New("/notes",
+    nativeui.Route{
+        Path: "/notes/new",
+        Screen: func(ctx context.Context, request nativeui.Request) (nativeui.Screen, error) {
+            return nativeui.Screen{
+                Title: "New note",
+                Actions: []nativeui.Action{{ID: "save", Label: "Done", Primary: true, Commit: true}},
+                Form: &nativeui.Form{Fields: []nativeui.Field{
+                    {Key: "title", Label: "Title", Kind: "text"},
+                    {Key: "body", Label: "Note", Kind: "multiline"},
+                }},
+            }, nil
+        },
+        Actions: map[string]nativeui.Handle{
+            "save": func(ctx context.Context, request nativeui.Request) (nativeui.Result, error) {
+                note, err := service.Save(ctx, "", request.Values["title"], request.Values["body"])
+                if err != nil {
+                    return nativeui.Result{}, err
+                }
+                return nativeui.Result{
+                    Navigation: &nativeui.Navigation{Kind: "pop"}, ClearDraft: true,
+                    Saved: &nativeui.SavedState{
+                        Route: "/notes/" + url.PathEscape(note.ID),
+                        Values: map[string]string{"title": note.Title, "body": note.Body},
+                    },
+                }, nil
+            },
+        },
+    },
+    // The root list and existing-note routes are registered alongside this one.
+)
 ```
 
-The native command acceptance tests exercise first startup into a nonexistent
-directory, validation, edit/search, restart persistence, snapshot bounds,
-installation isolation, and a native-created note opened by the web and terminal
-presenters. CLI tests render the native template, protect the unchanged plist,
-reject invalid template paths, and verify dry-run behavior. They do not pretend
-to execute UIKit.
+This abbreviated sketch omits the root route; the complete runnable composition
+is `examples/notes/notesscreens/screens.go`. That file also supplies draft policy,
+search, refresh, sharing, and the information sheet. Icons use semantic mobile
+names, mapped to native assets inside the renderer rather than SF Symbol names
+in application code.
 
-On November 4, 2026, the real gomobile framework and Swift app were compiled,
-signed, installed, and driven on an iPhone 17 Pro simulator running iOS 26.5.
-Observed workflows: empty list, blank-title error, create/save/reopen, native
-search/no-results, dirty Back/Keep Draft, draft restore after process restart,
-system keyboard with visible editing area, opening/dismissing Share without
-sending, and expanding the native information sheet from medium to large.
-Light/dark appearance and list/editor layouts at the largest accessibility text
-category were also inspected; this is a spot check, not full accessibility QA.
-Local screenshots under `/tmp/gofastr-native-*.png` are actual running-app
-evidence, not design mockups or checked-in golden images.
+The binding exports `Start(dataDir)`, `Stop()`, `Root()`, `Render(route, values)`,
+`Dispatch(route, action, values)`, and `Command(payload)`. JSON exists only at this **local in-process
+gomobile boundary** because it binds strings reliably. Applications construct Go
+structs and handlers, not JSON. It is neither a remote screen protocol nor an
+obligatory representation for other renderer modules. The earlier typed
+`List/Get/Save` exports remain compatible, but the generic renderer never calls
+them or knows their names.
 
-During final verification, shared Go cache files disappeared mid-build. The
-native rebuild passed with an isolated `GOCACHE` under `/tmp`; use a fresh cache
-directory if the same missing-cache-file error occurs, rather than changing
-dependencies or clearing another checkout's cache.
+Literal and `{parameter}` path segments are supported; register literals before
+overlapping parameterized routes. Query values and submitted fields appear in
+`Request.Values`; route parameters are separate in `Request.Params`. Remote
+URLs, missing routes, unregistered actions, malformed/oversized values, and
+unsupported screen/field/icon definitions return errors. Submitted values never
+supply identity or bypass service authorization. Register routes at startup; the
+registry is immutable afterwards.
 
-Not yet complete: VoiceOver and Switch Control, the full accessibility text/
-orientation matrix, real-device IME/haptics, physical-iPhone signing, Android
-native UI, or conflict/background synchronization. This machine has no configured
-Android SDK or JDK, so an uncompiled native Android presenter is intentionally
-not shipped. This is a working Notes slice, not a native UI toolkit or a claim
-of store readiness.
+## Runtime and navigation
+
+1. UIKit starts the binding off the UI thread, negotiates services, and opens
+   `Root()` through the local command protocol.
+2. Go resolves the route, reads the shared service, and builds mobile definitions.
+3. The library decodes one versioned response and mounts real UIKit controls.
+4. Typing, selection, focus, scrolling, keyboard geometry, and gesture state stay
+   native; there is no synchronous Go round-trip per keystroke. Debounced Go
+   checkpoints provide installation-local draft recovery.
+5. A named action sends the current fields to its registered Go handler. Go
+   validates and saves through the shared service before returning success effects.
+6. The native renderer applies push/pop, a medium/large sheet, dismissal, sharing,
+   haptics, announcements, or draft cleanup. Failed saves retain the fields/draft.
+
+**UIKit owns the sole presentation stack.** Go routes identify destinations and
+Go actions request navigation; there is no parallel browser history or hidden Go
+screen stack. Clean Back uses native navigation. Dirty editors disable edge-pop
+and show the Go-defined Keep Editing / Keep Draft / Discard prompt. Returning to
+a list refreshes its data while preserving that controller's search state.
+
+Async search ignores stale responses. Actions disable duplicate submission but
+leave editing enabled. The shared Go policy preserves newer text and adopts the
+created identity before another save. Business execution does not hold lifecycle
+or screen locks; commands have a 30-second context. Stop closes admission and
+drains operations before its 10-second host shutdown budget. A context-ignoring
+operation can still delay draining. See [runtime](mobile-runtime.md) and
+[lifecycle guarantees](mobile-lifecycle.md).
+
+## Native surface and limits
+
+Supported now: large-title navigation, inset-grouped lists, native search and
+pull refresh, a text form with single-line inputs followed by at most one
+multiline input, plain-text reading screens, navigation-bar actions, medium/large
+sheets, the system share UI, success/selection feedback, accessibility announcements,
+semantic colors, native text styles, and keyboard-layout-guide avoidance.
+
+Notes uses the shared Go file draft store; the optional older backend without
+`Command` retains its UserDefaults behavior. Drafts survive checkpoints/restarts
+but are not encrypted secrets, committed notes, cloud sync, autosave, or conflict
+handling. The shared Notes list still caps at 200 entries.
+
+Missing: Android native renderer, tabs, arbitrary component trees, custom native
+widgets, broad form controls, scene restoration, deep-link delivery,
+transactional presentation-effect acknowledgements, and
+a public GoFastr renderer-host mounting seam. No remote UI/code loading is added.
+
+**Bootstrap boundary:** startup composes `notesapp/application.Open` without a
+web presentation, then uses `mobilehost.ServiceOnly` for the complete in-memory
+Serve lifecycle. M3 Gate A is complete; listener-free Gate B is not. Neither
+GoFastr checkout is modified.
+
+## Verification
+
+`go test ./nativeui ./examples/notes/notesnative ./cmd/gofastr-mobile` checks
+route/action boundaries, definitions, create/search/edit/share/sheet effects,
+shared persistence/validation, no platform screen source in the Notes app, and
+renderer selection/rejection. Tests do not establish visual or platform parity.
+
+The Go-defined app is compiled, linked, installed, and exercised on the iPhone
+17 Pro / iOS 26.5 simulator. Actual UI checks cover invalid saves, create/save/
+reopen, search, Keep Draft across process restart, and opening/dismissing native
+sharing without sending content. Light/dark, keyboard, and large-text spot checks
+are recorded in the implementation notes. Physical haptics, VoiceOver, physical
+iPhone signing, and native Android are not verified.

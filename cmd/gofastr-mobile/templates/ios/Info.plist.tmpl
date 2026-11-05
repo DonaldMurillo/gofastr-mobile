@@ -10,7 +10,16 @@
 	<string>{{xml .Exe}}</string>
 	<key>CFBundleIdentifier</key>
 	<string>{{xml .ID}}</string>
-	<key>CFBundleInfoDictionaryVersion</key>
+{{if .URLScheme}}	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>{{xml .ID}}</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>{{xml .URLScheme}}</string></array>
+		</dict>
+	</array>
+{{end}}	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>{{xml .Name}}</string>
@@ -30,7 +39,11 @@
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>{{xml .MinOS}}</string>
-	<key>UIDeviceFamily</key>
+{{if .CameraUsage}}	<key>NSCameraUsageDescription</key>
+	<string>{{xml .CameraUsage}}</string>
+{{end}}{{if .MicrophoneUsage}}	<key>NSMicrophoneUsageDescription</key>
+	<string>{{xml .MicrophoneUsage}}</string>
+{{end}}	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>
 		<integer>2</integer>

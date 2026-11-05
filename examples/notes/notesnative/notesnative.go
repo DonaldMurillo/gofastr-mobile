@@ -1,11 +1,10 @@
-// Package notesnative binds typed Notes commands directly to native hosts.
-// It contains no screen schema, HTML response, or platform widget contract.
+// Package notesnative binds Go-authored mobile screens and shared Notes commands
+// to the library-owned native host. Applications do not supply Swift screens.
 package notesnative
 
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -13,21 +12,33 @@ import (
 	"github.com/DonaldMurillo/gofastr/core/handler"
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 
+	"github.com/DonaldMurillo/gofastr-mobile/behavior"
+	"github.com/DonaldMurillo/gofastr-mobile/device/files"
 	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notes"
-	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp"
+	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesapp/application"
+	"github.com/DonaldMurillo/gofastr-mobile/examples/notes/notesscreens"
 	"github.com/DonaldMurillo/gofastr-mobile/mobilehost"
+	"github.com/DonaldMurillo/gofastr-mobile/nativeui"
 )
 
 var state struct {
-	sync.RWMutex
-	host    *mobilehost.Host
-	service *notes.Service
-	user    *localapp.User
+	sync.Mutex
+	host       *mobilehost.Host
+	service    *notes.Service
+	user       *localapp.User
+	screens    *nativeui.App
+	runtime    *nativeui.Runtime
+	operations sync.WaitGroup
+	stopping   *stopResult
+}
+
+type stopResult struct {
+	done chan struct{}
+	err  error
 }
 
 // Start opens Notes for this installation. Call off the platform UI thread.
-// The current framework bootstrap still mounts an unused web presentation;
-// native commands do not send HTTP requests or render that presentation.
+// Shared startup uses App.Serve in memory, with no mounted web presentation.
 func Start(dataDir string) error {
 	state.Lock()
 	defer state.Unlock()
@@ -40,42 +51,112 @@ func Start(dataDir string) error {
 	if localapp.Install() {
 		return errors.New("notesnative: local identity cannot replace an authenticator")
 	}
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return err
-	}
-	user, err := localapp.LoadOrMint(dataDir)
+	shared, err := application.Open(dataDir)
 	if err != nil {
 		return err
 	}
-	app, host, err := notesapp.Build(dataDir, "")
+	attachments, err := files.NewStore(filepath.Join(dataDir, "mobile-files"))
 	if err != nil {
+		_ = shared.App.Shutdown(context.Background())
+		return err
+	}
+	screens, err := notesscreens.New(shared.Service, attachments)
+	if err != nil {
+		_ = shared.App.Shutdown(context.Background())
+		return err
+	}
+	drafts, err := behavior.NewFileDraftStore(filepath.Join(dataDir, "mobile-drafts"))
+	if err != nil {
+		_ = shared.App.Shutdown(context.Background())
+		return err
+	}
+	runtime, err := nativeui.NewRuntime(screens, nativeui.RuntimeOptions{Drafts: drafts})
+	if err != nil {
+		_ = shared.App.Shutdown(context.Background())
+		return err
+	}
+	host, err := mobilehost.New(shared.App, mobilehost.Config{Data: shared.Data, ServiceOnly: true})
+	if err != nil {
+		_ = shared.App.Shutdown(context.Background())
 		return err
 	}
 	if err := host.Start(); err != nil {
 		return err
 	}
-	state.host, state.service, state.user = host, notesapp.Service(app), user
+	state.host, state.service, state.user, state.screens = host, shared.Service, shared.Data.User, screens
+	state.runtime = runtime
 	return nil
 }
 
 // Stop waits for in-flight commands before draining the shared lifecycle.
 func Stop() error {
 	state.Lock()
-	defer state.Unlock()
+	if stopping := state.stopping; stopping != nil {
+		state.Unlock()
+		<-stopping.done
+		return stopping.err
+	}
 	if state.host == nil {
+		state.Unlock()
 		return nil
 	}
+	host := state.host
+	stopping := &stopResult{done: make(chan struct{})}
+	state.stopping = stopping
+	state.Unlock()
+	state.operations.Wait()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := state.host.Stop(ctx)
-	state.host, state.service, state.user = nil, nil, nil
+	err := host.Stop(ctx)
+	state.Lock()
+	state.host, state.service, state.user, state.screens = nil, nil, nil, nil
+	state.runtime = nil
+	state.stopping = nil
+	stopping.err = err
+	close(stopping.done)
+	state.Unlock()
 	return err
+}
+
+// Root is the native renderer's initial Go screen route.
+func Root() string { return notesscreens.Root }
+
+// Command executes the versioned renderer/editor protocol off the UI thread.
+func Command(payload string) (string, error) {
+	operation, err := beginCommand()
+	if err != nil {
+		return "", err
+	}
+	defer operation.finish()
+	return operation.runtime.CommandJSON(operation.ctx, payload)
+}
+
+// Render resolves a Go screen definition over the local gomobile boundary.
+func Render(route, values string) (string, error) {
+	command, err := beginCommand()
+	if err != nil {
+		return "", err
+	}
+	defer command.finish()
+	return command.screens.RenderJSON(command.ctx, route, values)
+}
+
+// Dispatch runs a registered Go screen action, not a platform-specific callback.
+func Dispatch(route, action, values string) (string, error) {
+	command, err := beginCommand()
+	if err != nil {
+		return "", err
+	}
+	defer command.finish()
+	return command.screens.DispatchJSON(command.ctx, route, action, values)
 }
 
 // Note is a data snapshot, not a view description. Its strings are bound by
 // gomobile to platform strings; renderers decide how to present them.
 type Note struct {
-	ID, Title, Body, UpdatedAt string
+	ID, Title, Body, UpdatedAt      string
+	Pinned, Archived, Trashed       bool
+	Tag, ReminderDate, ReminderTime string
 }
 
 // NoteList crosses gomobile without imposing JSON or a platform collection.
@@ -94,14 +175,12 @@ func (list *NoteList) Item(index int) *Note {
 
 // List queries Notes directly. Call off the platform UI thread.
 func List(search string) (*NoteList, error) {
-	state.RLock()
-	defer state.RUnlock()
-	if state.service == nil {
-		return nil, errors.New("notesnative: not started")
+	command, err := beginCommand()
+	if err != nil {
+		return nil, err
 	}
-	ctx, cancel := commandContext()
-	defer cancel()
-	items, err := state.service.List(ctx, search)
+	defer command.finish()
+	items, err := command.service.List(command.ctx, search)
 	if err != nil {
 		return nil, err
 	}
@@ -114,14 +193,12 @@ func List(search string) (*NoteList, error) {
 
 // Get returns one visible note. Call off the platform UI thread.
 func Get(id string) (*Note, error) {
-	state.RLock()
-	defer state.RUnlock()
-	if state.service == nil {
-		return nil, errors.New("notesnative: not started")
+	command, err := beginCommand()
+	if err != nil {
+		return nil, err
 	}
-	ctx, cancel := commandContext()
-	defer cancel()
-	note, err := state.service.Get(ctx, id)
+	defer command.finish()
+	note, err := command.service.Get(command.ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -131,24 +208,44 @@ func Get(id string) (*Note, error) {
 // Save creates or updates a note through shared validation and owner scopes.
 // Call off the platform UI thread; only success means the data was committed.
 func Save(id, title, body string) (*Note, error) {
-	state.RLock()
-	defer state.RUnlock()
-	if state.service == nil {
-		return nil, errors.New("notesnative: not started")
+	command, err := beginCommand()
+	if err != nil {
+		return nil, err
 	}
-	ctx, cancel := commandContext()
-	defer cancel()
-	note, err := state.service.Save(ctx, id, title, body)
+	defer command.finish()
+	note, err := command.service.Save(command.ctx, id, title, body)
 	if err != nil {
 		return nil, err
 	}
 	return snapshot(note), nil
 }
 
-func commandContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(handler.SetUser(context.Background(), state.user), 30*time.Second)
+type operation struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	service *notes.Service
+	screens *nativeui.App
+	runtime *nativeui.Runtime
+}
+
+func beginCommand() (*operation, error) {
+	state.Lock()
+	defer state.Unlock()
+	if state.host == nil || state.stopping != nil {
+		return nil, errors.New("notesnative: not started or stopping")
+	}
+	state.operations.Add(1)
+	ctx, cancel := context.WithTimeout(handler.SetUser(context.Background(), state.user), 30*time.Second)
+	return &operation{ctx: ctx, cancel: cancel, service: state.service, screens: state.screens, runtime: state.runtime}, nil
+}
+
+func (command *operation) finish() {
+	command.cancel()
+	state.operations.Done()
 }
 
 func snapshot(note notes.Note) *Note {
-	return &Note{ID: note.ID, Title: note.Title, Body: note.Body, UpdatedAt: note.UpdatedAt.Format(time.RFC3339)}
+	return &Note{ID: note.ID, Title: note.Title, Body: note.Body, UpdatedAt: note.UpdatedAt.Format(time.RFC3339),
+		Pinned: note.Pinned, Archived: note.Archived, Trashed: note.Trashed,
+		Tag: note.Tag, ReminderDate: note.ReminderDate, ReminderTime: note.ReminderTime}
 }

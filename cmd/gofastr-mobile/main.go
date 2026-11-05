@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -34,14 +35,19 @@ Flags (build, run):
   --platform    ios-sim (iOS simulator, needs a Mac with Xcode installed)
                 android-emu (Android emulator or attached device, needs the
                 Android SDK, NDK and a JDK)
-  --pkg         the bind package: the default host uses Start, Stop, Handle,
-                Open, Bridge (see examples/notes/notesmobile); custom host
-                templates choose their own bind contract
+  --pkg         the bind package: webview uses Start, Stop, Handle, Open,
+                Bridge; native uses Start, Stop, Root, Render, Dispatch
+                (see examples/notes/notesnative)
   --id          bundle / application id (default dev.gofastr.<package>)
   --name        name on the home screen (default: the package name)
   --version     app version (default 0.1.0)
   --out         output directory (default dist/mobile/<platform>)
   --host-template  caller-owned Swift/Java host template (default: WebView host)
+  --renderer    webview (default) or native (Go screen definitions; iOS only)
+  --camera-usage  iOS camera purpose text (default: user-initiated photo capture;
+                empty disables native camera access)
+  --microphone-usage  optional iOS microphone purpose text; empty disables recording
+  --url-scheme  optional application-specific deep-link scheme (native iOS only)
   --dry-run     print every step without running it
 
 Flags (run only):
@@ -72,6 +78,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	version := fs.String("version", "", "app version")
 	out := fs.String("out", "", "output directory")
 	hostTemplate := fs.String("host-template", "", "caller-owned native host template")
+	renderer := fs.String("renderer", "webview", "webview or native (iOS only)")
+	cameraUsage := fs.String("camera-usage", defaultCameraUsage, "iOS camera purpose string; empty disables native camera")
+	microphoneUsage := fs.String("microphone-usage", "", "iOS microphone purpose string; empty disables recording")
+	urlScheme := fs.String("url-scheme", "", "application-specific deep-link scheme (native iOS only)")
 	dry := fs.Bool("dry-run", false, "print the steps only")
 	device := fs.String("device", "", "simulator / device / AVD")
 	shot := fs.String("screenshot", "", "screenshot path")
@@ -101,8 +111,40 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "--pkg is required (for this module: --pkg ./examples/notes/notesmobile)")
 		return 2
 	}
+	if *renderer != "webview" && *renderer != "native" {
+		fmt.Fprintln(stderr, "--renderer must be webview or native")
+		return 2
+	}
+	if *renderer == "native" && *platform != "ios-sim" {
+		fmt.Fprintln(stderr, "--renderer native: Android native rendering is not implemented; use --renderer webview or --platform ios-sim")
+		return 2
+	}
+	if *renderer == "native" && *hostTemplate != "" {
+		fmt.Fprintln(stderr, "--renderer native cannot use --host-template")
+		return 2
+	}
+	if err := validateURLScheme(*urlScheme); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if *urlScheme != "" && (*renderer != "native" || *platform != "ios-sim") {
+		fmt.Fprintln(stderr, "--url-scheme currently requires --renderer native --platform ios-sim")
+		return 2
+	}
 	if *wait < 0 {
 		fmt.Fprintln(stderr, "--wait must not be negative")
+		return 2
+	}
+	if err := validateCameraUsage(*cameraUsage); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if err := validateMicrophoneUsage(*microphoneUsage); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if strings.TrimSpace(*microphoneUsage) != "" && *platform != "ios-sim" {
+		fmt.Fprintln(stderr, "--microphone-usage currently requires --platform ios-sim")
 		return 2
 	}
 	if *hostTemplate != "" {
@@ -129,6 +171,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	a.HostTemplate = *hostTemplate
+	a.Renderer = *renderer
+	a.CameraUsage = strings.TrimSpace(*cameraUsage)
+	a.MicrophoneUsage = strings.TrimSpace(*microphoneUsage)
+	a.URLScheme = *urlScheme
 	dir := *out
 	if dir == "" {
 		dir = filepath.Join("dist", "mobile", *platform)

@@ -67,6 +67,7 @@ func Theme(platform Platform) style.Theme {
 // Action is a link or a submit action associated with a named form.
 type Action struct {
 	Label, Href, Icon, Form string
+	Name, Value, FormAction string
 }
 
 // Page configures presentation chrome, not application routing semantics.
@@ -75,6 +76,7 @@ type Page struct {
 	Title, Subtitle     string
 	BackHref, BackLabel string
 	Primary             Action
+	Leading, Actions    []Action
 	Editor              bool
 }
 
@@ -90,10 +92,24 @@ func Screen(page Page, children ...render.HTML) render.HTML {
 	} else {
 		leading = render.Tag("span", map[string]string{"class": "gfm-wordmark"}, icon("notebook"), render.Text("ON THIS DEVICE"))
 	}
-	var trailing render.HTML
-	if page.Primary.Label != "" && (page.Platform == IOS || page.Editor) {
-		trailing = action(page.Primary, "gfm-nav-action")
+	if len(page.Leading) != 0 {
+		buttons := []render.HTML{}
+		if page.BackHref != "" {
+			buttons = append(buttons, leading)
+		}
+		for _, item := range page.Leading {
+			buttons = append(buttons, action(item, "gfm-nav-action"))
+		}
+		leading = render.Tag("div", map[string]string{"class": "gfm-nav-actions"}, buttons...)
 	}
+	buttons := []render.HTML{}
+	for _, item := range page.Actions {
+		buttons = append(buttons, action(item, "gfm-nav-action"))
+	}
+	if page.Primary.Label != "" && (page.Platform == IOS || page.Editor) {
+		buttons = append(buttons, action(page.Primary, "gfm-nav-action"))
+	}
+	trailing := render.Tag("div", map[string]string{"class": "gfm-nav-actions"}, buttons...)
 	titleTag := "span"
 	if page.Editor {
 		titleTag = "h1"
@@ -129,6 +145,15 @@ func action(config Action, class string) render.HTML {
 	attrs := map[string]string{"class": class, "aria-label": config.Label}
 	if config.Form != "" {
 		attrs["type"], attrs["form"] = "submit", config.Form
+		if config.Name != "" {
+			attrs["name"] = config.Name
+		}
+		if config.Value != "" {
+			attrs["value"] = config.Value
+		}
+		if config.FormAction != "" {
+			attrs["formaction"] = urlsafe.CleanAnchor(config.FormAction)
+		}
 		return render.Tag("button", attrs, children...)
 	}
 	attrs["href"] = urlsafe.CleanAnchor(config.Href)
@@ -216,6 +241,8 @@ func icon(name string) render.HTML {
 		"notebook": "M6 3h13v18H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2 M8 3v18 M12 8h4 M12 12h4",
 		"device":   "M8 2h8a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1 M10 18h4",
 		"check":    "m5 12 4 4L19 6",
+		"info":     "M12 11v6 M12 7v.01 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0",
+		"share":    "M12 16V2 M7 7l5-5 5 5 M5 12v9h14v-9",
 	}
 	path, present := paths[name]
 	if !present || strings.TrimSpace(name) == "" {

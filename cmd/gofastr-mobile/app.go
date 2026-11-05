@@ -11,13 +11,15 @@ import (
 	"regexp"
 	"strings"
 	"text/template"
+	"unicode"
+	"unicode/utf8"
 )
 
 //go:embed templates
 var templates embed.FS
 
-// The bind package's contract: gomobile binds the package named by --pkg,
-// and the generated hosts call exactly these functions on it, so any app
+// The default WebView contract: gomobile binds the package named by --pkg,
+// and the WebView hosts call exactly these functions on it, so any app
 // that exports them (examples/notes/notesmobile is the reference) runs:
 //
 //	func Start(dataDir, origin string) error
@@ -26,14 +28,19 @@ var templates embed.FS
 //	func Open(method, url, headers string, body []byte) (*Stream, error)
 //	type Response struct{ Status int; Headers string; Body []byte }
 //	type Stream  struct{ Status int; Headers string } // + Read(max int) ([]byte, error), Close() error
+//
+// The native renderer instead uses Start(dataDir), Stop(), Root(),
+// Render(route, values), Dispatch(route, action, values), and Command(payload). See
+// docs/native-presentation.md for the Go screen-authoring contract.
 
 const (
-	iosScheme     = "gofastr"
-	iosOrigin     = "gofastr://app"
-	androidHost   = "appassets.androidplatform.net"
-	androidOrigin = "https://" + androidHost
-	minIOS        = "16.0" // NSLock.withLock, WKWebView.isInspectable checks
-	minSDK        = 24
+	iosScheme          = "gofastr"
+	iosOrigin          = "gofastr://app"
+	androidHost        = "appassets.androidplatform.net"
+	androidOrigin      = "https://" + androidHost
+	minIOS             = "16.0" // NSLock.withLock, WKWebView.isInspectable checks
+	minSDK             = 24
+	defaultCameraUsage = "Use the camera when you choose to take a photo."
 )
 
 // app is everything the templates and steps need to know about the app.
@@ -56,17 +63,22 @@ type app struct {
 	MinSDK      int
 	TargetSDK   int
 
-	Scheme       string
-	Origin       string
-	Host         string
-	HostTemplate string
+	Scheme          string
+	Origin          string
+	Host            string
+	HostTemplate    string
+	Renderer        string
+	CameraUsage     string
+	MicrophoneUsage string
+	URLScheme       string
 }
 
 var (
-	goIdent   = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	appIDRe   = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$`)
-	appNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,29}$`)
-	versionRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,2}$`)
+	goIdent     = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	appIDRe     = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$`)
+	appNameRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,29}$`)
+	versionRe   = regexp.MustCompile(`^[0-9]+(\.[0-9]+){0,2}$`)
+	urlSchemeRe = regexp.MustCompile(`^[a-z][a-z0-9+.-]*$`)
 )
 
 // javaReserved are the Java keywords an application id segment may not
@@ -129,7 +141,36 @@ func newApp(pkgPath, pkgName, id, name, version string) (app, error) {
 		MinOS:       minIOS,
 		MinSDK:      minSDK,
 		TargetSDK:   minSDK,
+		CameraUsage: defaultCameraUsage,
 	}, nil
+}
+
+func validateCameraUsage(value string) error {
+	if len(value) > 512 || !utf8.ValidString(value) || strings.ContainsFunc(value, unicode.IsControl) {
+		return errors.New("--camera-usage must be at most 512 UTF-8 bytes with no control characters; empty disables native camera access")
+	}
+	return nil
+}
+
+func validateMicrophoneUsage(value string) error {
+	if len(value) > 512 || !utf8.ValidString(value) || strings.ContainsFunc(value, unicode.IsControl) {
+		return errors.New("--microphone-usage must be at most 512 UTF-8 bytes with no control characters; empty disables microphone access")
+	}
+	return nil
+}
+
+func validateURLScheme(value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) > 64 || !urlSchemeRe.MatchString(value) {
+		return errors.New("--url-scheme must be 1-64 lowercase URI-scheme characters, starting with a letter")
+	}
+	switch value {
+	case "http", "https", "file", "data", "javascript", "about", "blob", iosScheme:
+		return errors.New("--url-scheme must be an application-specific scheme, not a web, file, or internal scheme")
+	}
+	return nil
 }
 
 func (a app) forIOS() app {
@@ -151,6 +192,8 @@ func render(path string, a app) ([]byte, error) {
 	var err error
 	if a.HostTemplate != "" && (path == "templates/ios/App.swift.tmpl" || path == "templates/android/MainActivity.java.tmpl") {
 		src, err = os.ReadFile(a.HostTemplate)
+	} else if a.Renderer == "native" && path == "templates/ios/App.swift.tmpl" {
+		src, err = templates.ReadFile("templates/ios/NativeApp.swift.tmpl")
 	} else {
 		src, err = templates.ReadFile(path)
 	}

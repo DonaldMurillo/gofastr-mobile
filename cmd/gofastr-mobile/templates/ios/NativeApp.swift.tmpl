@@ -1,0 +1,63 @@
+import UIKit
+import {{.Prefix}}
+
+@main
+final class AppDelegate: UIResponder, UIApplicationDelegate {
+    var window: UIWindow?
+    private let renderer = GofastrNativeRenderer(backend: GofastrNativeBackend(
+        start: { directory in
+            var error: NSError?
+            guard {{.Prefix}}Start(directory, &error) else {
+                throw error ?? NSError(domain: "GoFastrMobile", code: 1, userInfo: [NSLocalizedDescriptionKey: "Couldn’t finish. Please try again."])
+            }
+        },
+        stop: {
+            var error: NSError?
+            guard {{.Prefix}}Stop(&error) else {
+                throw error ?? NSError(domain: "GoFastrMobile", code: 1, userInfo: [NSLocalizedDescriptionKey: "Couldn’t finish. Please try again."])
+            }
+        },
+        root: { {{.Prefix}}Root() },
+        render: { route, values in
+            var error: NSError?
+            let encoded = {{.Prefix}}Render(route, values, &error)
+            if let error { throw error }
+            return encoded
+        },
+        dispatch: { route, action, values in
+            var error: NSError?
+            let encoded = {{.Prefix}}Dispatch(route, action, values, &error)
+            if let error { throw error }
+            return encoded
+        },
+        command: { payload in
+            var error: NSError?
+            let encoded = {{.Prefix}}Command(payload, &error)
+            if let error { throw error }
+            return encoded
+        }
+    ))
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        window = renderer.makeWindow()
+{{if .URLScheme}}        if let url = options?[.url] as? URL { _ = open(url) }
+{{end}}        return true
+    }
+
+{{if .URLScheme}}    func application(_ application: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
+        open(url)
+    }
+
+    private func open(_ url: URL) -> Bool {
+        guard url.scheme == "{{.URLScheme}}" else { return false }
+        return renderer.openURL(url)
+    }
+
+{{end}}    func applicationDidEnterBackground(_ application: UIApplication) {
+        renderer.checkpoint()
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+        renderer.stop()
+    }
+}

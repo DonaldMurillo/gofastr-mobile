@@ -53,7 +53,7 @@
   document.addEventListener('submit', async (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
-    if (form.matches('.gfm-search')) {
+    if (form.matches('.gfm-search') && !form.hasAttribute('data-gfw-search')) {
       if (typeof runtime?.navigate !== 'function') return;
       event.preventDefault();
       const destination = new URL(form.action, location.href);

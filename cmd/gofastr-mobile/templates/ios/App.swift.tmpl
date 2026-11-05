@@ -35,6 +35,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
 final class GoWebViewController: UIViewController, WKNavigationDelegate {
     private var webView: WKWebView!
     private var evaluated = false
+    private var services: GofastrWebViewServices!
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -43,8 +44,11 @@ final class GoWebViewController: UIViewController, WKNavigationDelegate {
         config.setURLSchemeHandler(GoSchemeHandler(), forURLScheme: appScheme)
         let bridge = GoBridge()
         config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "gofastr")
+        services = GofastrWebViewServices(presenter: self, origin: URL(string: appOrigin)!)
+        config.userContentController.addScriptMessageHandler(services, contentWorld: .page, name: "gofastrServices")
         webView = WKWebView(frame: view.bounds, configuration: config)
         bridge.webView = webView
+        services.attach(webView)
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         webView.navigationDelegate = self
         webView.isOpaque = false
@@ -73,7 +77,12 @@ final class GoWebViewController: UIViewController, WKNavigationDelegate {
 }
 
 extension GoWebViewController {
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        services.navigationStarted()
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        services.navigationFinished()
         #if targetEnvironment(simulator)
         // gofastr-mobile's simulator check: GOFASTR_MOBILE_EVAL (simctl
         // launch passes SIMCTL_CHILD_GOFASTR_MOBILE_EVAL through) is the

@@ -4,8 +4,13 @@ This is an implementation experiment, not a new cross-platform rendering API.
 GoFastr remains web-first. The mobile presentation lives **outside GoFastr** in
 the importable `github.com/DonaldMurillo/gofastr-mobile/mobileui` package. No
 changes to either GoFastr checkout are needed, and no dependencies were added.
-An additional [UIKit presenter](native-presentation.md) now exercises the same
-boundary with real native controls and direct typed Go commands.
+An additional [Go-defined native presenter](native-presentation.md) exercises
+the boundary with real UIKit controls. Apps compose mobile screens/actions in
+Go; the library owns the platform renderer, not application Swift templates.
+
+The newer [shared mobile screen adapter](shared-mobile-screens.md) also renders
+`notesscreens` through WebView. The `notesweb` presentation described here remains
+an independent compatibility example, not the UI used by `notesmobile.Start`.
 
 ## The boundary being tested
 
@@ -16,15 +21,18 @@ boundary with real native controls and direct typed Go commands.
 | `mobileui` | Mobile-web markup, tokens, components, CSS, browser behavior | Notes data, business validation, native OS integration |
 | `examples/notes/notesweb` | Handwritten Notes screen composition and HTTP command adaptation | CSS or overrides of another design system's internals |
 | `examples/notes/notesterminal` | A line-oriented terminal presentation of the same service | HTML, browser runtime, GoFastr imports |
-| `examples/notes/notesnative` | Typed gomobile commands, snapshots, installation identity, lifecycle adaptation | Screen schemas or native widget definitions |
-| `examples/notes/native/ios` | Real UIKit screens and native capabilities | HTTP/HTML rendering or duplicated application validation |
+| `examples/notes/notesnative` | Gomobile screen/action entry points, installation identity, lifecycle adaptation | Platform screen source or duplicated validation |
+| `examples/notes/notesscreens` | Go mobile screen composition and actions using `nativeui` | Swift, Java, HTML, CSS, or wire JSON |
+| `nativeui`, `render/ios`, `render/webview` | Shared mobile definitions, local dispatch, platform rendering and capabilities | A mandatory representation for existing web apps, canvas, desktop, or TUI |
 | `examples/notes/notesapp` | Application composition, entity declaration, adapter selection | Styles or hand-rolled screen markup |
 | `mobilehost` | Existing in-process lifecycle and transport | Screen presentation |
 
-The presentations share application behavior, **not a widget tree**. The
-terminal creates notes that the web presentation can open, and edits made by
-the web presentation are visible in the terminal. Both use the same persisted
-entity, validation, identity, and owner scopes.
+The independent web and terminal presentations share application behavior,
+**not a widget tree**. UIKit and the new mobile WebView adapter additionally
+share the Go mobile screen definitions; desktop/canvas/TUI need not implement
+them. The terminal creates notes that the web presentation can open, and edits
+made by the web presentation are visible in the terminal when they use the same
+data directory. They use the same entity, validation, identity, and owner scopes.
 
 `notesapp.Service(app)` supplies typed behavior for an initialized application.
 Direct callers must provide authenticated context, just as other in-process
@@ -45,8 +53,9 @@ It neither overrides `framework/ui` selectors nor adds `data-cui-*` contracts.
 
 `notesweb.New(service, platform)` creates the web host. `notesapp.BuildWithPlatform`
 selects `mobileui.IOS` or `mobileui.Android` **before initial SSR**. Unsupported
-modes return an error. The WebView Notes binding supplies the platform from its
-compiled OS; the legacy `Build` helper defaults to iOS. Width is not a platform
+modes return an error. The WebView Notes binding selects the shared-screen
+adapter instead, using the same platform from its compiled OS; the legacy
+`Build` helper defaults to iOS. Width is not a platform
 detector. Tests intentionally use an iPhone user agent for both modes.
 
 The presentation provides:
@@ -166,8 +175,10 @@ Keep the current web renderer and design system as the default. Do not add iOS
 controls or terminal widgets to core. External web packages can already own
 components and screens through public APIs.
 
-The UIKit host now demonstrates direct command/data bindings without HTML,
-but still needs the web-oriented bootstrap. Extract only the demonstrated gaps:
+The native host now demonstrates Go-owned mobile screens/actions without HTML
+and composes its services without mounting a web UI. It still uses in-memory
+Serve for full lifecycle ownership, not a listener-free native startup. See
+[Gate A and the remaining Gate B seam](mobile-lifecycle.md). Extract only the demonstrated gaps:
 host-neutral app lifecycle, destination/action identity independent of HTTP,
 explicit host capabilities, and screen activation/disposal/navigation delivery.
 A native renderer should mount native controls, a canvas renderer should own its

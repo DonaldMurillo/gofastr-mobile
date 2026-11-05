@@ -53,30 +53,41 @@ type Config struct {
 	Origin string
 	// StartTimeout bounds Start; 30s when zero.
 	StartTimeout time.Duration
+	// ServiceOnly skips the WebView bridge and UIHost requirement. The app
+	// still runs its complete App.Serve lifecycle on an in-memory listener.
+	ServiceOnly bool
 }
 
 // Host owns one in-process app.
 type Host struct {
-	cfg    Config
-	origin *url.URL
-	app    *framework.App
-	ln     *memListener
-	client *http.Client
-	jar    http.CookieJar
+	cfg           Config
+	origin        *url.URL
+	app           *framework.App
+	ln            *memListener
+	client        *http.Client
+	jar           http.CookieJar
+	bridgeContext context.Context
+	cancelBridge  context.CancelFunc
 
 	user             *localapp.User
 	authOwnsIdentity bool
 
-	mu      sync.Mutex
-	started bool
-	ready   chan struct{}
-	done    chan error
+	mu       sync.Mutex
+	started  bool
+	ready    chan struct{}
+	done     chan struct{}
+	serveErr error
+	stopDone chan struct{}
+	stopErr  error
 }
 
 // New prepares a Host for app and registers it as the app's "mobile"
 // battery (its Init installs the local identity). Call it after the app's
-// UI host is mounted and before Start.
+// UI host is mounted and before Start, unless Config.ServiceOnly is set.
 func New(app *framework.App, cfg Config) (*Host, error) {
+	if app == nil {
+		return nil, errors.New("mobilehost: app is required")
+	}
 	if cfg.Origin == "" {
 		cfg.Origin = DefaultOrigin
 	}
@@ -95,15 +106,18 @@ func New(app *framework.App, cfg Config) (*Host, error) {
 		return nil, err
 	}
 	ln := newMemListener()
+	bridgeContext, cancelBridge := context.WithCancel(context.Background())
 	h := &Host{
-		cfg:    cfg,
-		origin: origin,
-		app:    app,
-		ln:     ln,
-		jar:    jar,
-		user:   cfg.Data.User,
-		ready:  make(chan struct{}),
-		done:   make(chan error, 1),
+		cfg:           cfg,
+		origin:        origin,
+		app:           app,
+		ln:            ln,
+		jar:           jar,
+		user:          cfg.Data.User,
+		ready:         make(chan struct{}),
+		done:          make(chan struct{}),
+		bridgeContext: bridgeContext,
+		cancelBridge:  cancelBridge,
 		//gofastr:allow(clienttimeout) the same client carries held SSE streams (Open), which a client-wide Timeout would cut; Do is bounded by its caller's context and a Stream by Close
 		client: &http.Client{
 			Transport: &http.Transport{
@@ -145,6 +159,10 @@ func (h *Host) Init(app *framework.App) error {
 		app.NoteAuthenticator()
 	}
 	app.Use(h.identityMiddleware)
+	app.OnReady(func(string) { close(h.ready) })
+	if h.cfg.ServiceOnly {
+		return nil
+	}
 	var ui *uihost.UIHost
 	for _, m := range app.Mountables() {
 		if u, ok := m.(*uihost.UIHost); ok {
@@ -159,7 +177,6 @@ func (h *Host) Init(app *framework.App) error {
 	if err := ui.RegisterExternalScript(uihost.ScriptURL(bridgeScriptPath, bridgeJS)); err != nil {
 		return fmt.Errorf("mobilehost: register bridge script: %w", err)
 	}
-	app.OnReady(func(string) { close(h.ready) })
 	return nil
 }
 
@@ -168,41 +185,86 @@ func (h *Host) Init(app *framework.App) error {
 // should call it off the UI thread and show its launch screen meanwhile.
 func (h *Host) Start() error {
 	h.mu.Lock()
-	if h.started {
+	if h.started || h.stopDone != nil {
 		h.mu.Unlock()
 		return errors.New("mobilehost: Start called twice")
 	}
 	h.started = true
-	h.mu.Unlock()
-
 	// The OS owns a phone app's lifecycle; there is no SIGTERM to drain on.
 	h.app.Config.DisableSignalHandling = true
-	go func() { h.done <- h.app.Serve(h.ln) }()
+	go func() {
+		err := h.app.Serve(h.ln)
+		var shutdownDone chan struct{}
+		h.mu.Lock()
+		if h.stopDone == nil {
+			shutdownDone = make(chan struct{})
+			h.stopDone = shutdownDone
+		}
+		h.mu.Unlock()
+		if shutdownDone != nil {
+			h.cancelBridge()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err = errors.Join(err, h.app.Shutdown(ctx))
+			cancel()
+			_ = h.ln.Close()
+		}
+		h.serveErr = err
+		h.client.CloseIdleConnections()
+		close(h.done)
+		if shutdownDone != nil {
+			h.stopErr = err
+			close(shutdownDone)
+		}
+	}()
+	h.mu.Unlock()
+	timer := time.NewTimer(h.cfg.StartTimeout)
+	defer timer.Stop()
 	select {
 	case <-h.ready:
 		return nil
-	case err := <-h.done:
+	case <-h.done:
+		err := h.serveErr
 		if err == nil {
 			err = errors.New("app stopped before it was ready")
 		}
 		return fmt.Errorf("mobilehost: start: %w", err)
-	case <-time.After(h.cfg.StartTimeout):
-		_ = h.Stop(context.Background())
-		return fmt.Errorf("mobilehost: app not ready within %s", h.cfg.StartTimeout)
+	case <-timer.C:
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return errors.Join(fmt.Errorf("mobilehost: app not ready within %s", h.cfg.StartTimeout), h.Stop(ctx))
 	}
 }
 
 // Stop drains the app (OnStop hooks, batteries, open streams) and waits
 // for Serve to return.
 func (h *Host) Stop(ctx context.Context) error {
-	err := h.app.Shutdown(ctx)
-	select {
-	case serveErr := <-h.done:
-		if err == nil {
-			err = serveErr
+	h.mu.Lock()
+	if done := h.stopDone; done != nil {
+		h.mu.Unlock()
+		select {
+		case <-done:
+			return h.stopErr
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-	case <-ctx.Done():
 	}
+	h.stopDone = make(chan struct{})
+	started := h.started
+	h.mu.Unlock()
+	h.cancelBridge()
+	err := h.app.Shutdown(ctx)
+	_ = h.ln.Close()
+	h.client.CloseIdleConnections()
+	if started {
+		select {
+		case <-h.done:
+			err = errors.Join(err, h.serveErr)
+		case <-ctx.Done():
+			err = errors.Join(err, ctx.Err())
+		}
+	}
+	h.stopErr = err
+	close(h.stopDone)
 	return err
 }
 

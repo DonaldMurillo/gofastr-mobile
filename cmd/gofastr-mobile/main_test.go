@@ -30,13 +30,18 @@ func notesApp(t *testing.T) app {
 // gomobile will hand the generated hosts.
 func gobindOut(t *testing.T) string {
 	t.Helper()
+	return gobindPackageOut(t, notesPkg)
+}
+
+func gobindPackageOut(t *testing.T, pkg string) string {
+	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "gobind")
 	if out, err := exec.Command("go", "build", "-o", bin, "golang.org/x/mobile/cmd/gobind").CombinedOutput(); err != nil {
 		t.Skipf("cannot build gobind (offline module cache?): %v\n%s", err, out)
 	}
 	out := filepath.Join(dir, "out")
-	cmd := exec.Command(bin, "-lang=java,objc", "-outdir", out, notesPkg)
+	cmd := exec.Command(bin, "-lang=java,objc", "-outdir", out, pkg)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("gobind: %v\n%s", err, b)
 	}
