@@ -109,6 +109,21 @@ func validateList(list List, actions map[string]Handle) error {
 		if strings.TrimSpace(row.Title) == "" || len(rowActions) > 16 {
 			return errors.New("nativeui: invalid row title or action count")
 		}
+		for _, text := range []struct {
+			value   string
+			matches []TextRange
+		}{{row.Title, row.TitleMatches}, {row.Subtitle, row.SubtitleMatches}} {
+			last := 0
+			if len(text.matches) > 32 {
+				return errors.New("nativeui: too many text matches")
+			}
+			for _, match := range text.matches {
+				if match.Start < last || match.End <= match.Start || match.End > len([]rune(text.value)) {
+					return errors.New("nativeui: invalid text match")
+				}
+				last = match.End
+			}
+		}
 		if row.Icon != "" && row.Icon != IconFile && row.Icon != IconPhoto && row.Icon != IconAudio {
 			return errors.New("nativeui: unsupported row icon")
 		}

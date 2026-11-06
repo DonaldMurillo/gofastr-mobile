@@ -172,6 +172,7 @@ func listMarkup(screen nativeui.Screen, failure *nativeui.ActionError) render.HT
 	}
 	if list.Selection != nil {
 		tools = append(tools, render.Tag("button", map[string]string{"type": "button", "data-gfw-selection-toggle": "", "aria-pressed": "false"}, render.Text("Select")))
+		tools = append(tools, render.Tag("button", map[string]string{"type": "button", "data-gfw-select-loaded": "", "hidden": ""}, render.Text("Select loaded")), render.Tag("button", map[string]string{"type": "button", "data-gfw-clear-selection": "", "hidden": ""}, render.Text("Clear selection")))
 	}
 	if len(tools) != 0 {
 		content = append(content, render.Tag("div", map[string]string{"class": "gfw-collection-tools"}, tools...))
@@ -213,7 +214,7 @@ func listMarkup(screen nativeui.Screen, failure *nativeui.ActionError) render.HT
 				linkAttrs["aria-disabled"] = "true"
 			}
 		}
-		copy := []render.HTML{render.Tag("h2", nil, render.Text(row.Title)), render.Tag("p", nil, render.Text(row.Subtitle))}
+		copy := []render.HTML{render.Tag("h2", nil, matchedText(row.Title, row.TitleMatches)), render.Tag("p", nil, matchedText(row.Subtitle, row.SubtitleMatches))}
 		if row.Metadata != "" {
 			copy = append(copy, render.Tag("span", map[string]string{"class": "gfw-row-metadata"}, render.Text(row.Metadata)))
 		}
@@ -272,6 +273,21 @@ func listMarkup(screen nativeui.Screen, failure *nativeui.ActionError) render.HT
 	body := render.Tag("div", map[string]string{"data-gfw-collection-content": ""}, content[bodyStart:]...)
 	content = append(content[:bodyStart], body)
 	return render.Tag("div", map[string]string{"data-gfw-list": ""}, content...)
+}
+
+func matchedText(text string, matches []nativeui.TextRange) render.HTML {
+	runes := []rune(text)
+	last := 0
+	parts := []render.HTML{}
+	for _, match := range matches {
+		if match.Start < last || match.End <= match.Start || match.End > len(runes) {
+			return render.Text(text)
+		}
+		parts = append(parts, render.Text(string(runes[last:match.Start])), render.Tag("mark", nil, render.Text(string(runes[match.Start:match.End]))))
+		last = match.End
+	}
+	parts = append(parts, render.Text(string(runes[last:])))
+	return render.Join(parts...)
 }
 
 func tabMarkup(screen nativeui.Screen) render.HTML {

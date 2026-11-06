@@ -28,6 +28,20 @@
     }
     return defaults ? field.defaultValue : field.value;
   };
+  const matchedParts = (text, matches) => {
+    text = String(text ?? '');
+    const runes = Array.from(text), parts = [];
+    let last = 0;
+    if (!Array.isArray(matches) || matches.length > 32) return [{ text, matched: false }];
+    for (const match of matches) {
+      if (!Number.isInteger(match.start) || !Number.isInteger(match.end) || match.start < last || match.end <= match.start || match.end > runes.length) return [{ text, matched: false }];
+      if (match.start > last) parts.push({ text: runes.slice(last, match.start).join(''), matched: false });
+      parts.push({ text: runes.slice(match.start, match.end).join(''), matched: true });
+      last = match.end;
+    }
+    if (last < runes.length) parts.push({ text: runes.slice(last).join(''), matched: false });
+    return parts;
+  };
   const setField = (field, value) => {
     if (field.disabled) return;
     if (field.type === 'checkbox') {
@@ -141,7 +155,7 @@
     return side.length ? { kind: 'menu', side: gesture.side } : { kind: 'cancel' };
   };
 
-  const api = { fileIcon, fieldValue, setField, serialize, localRoute, reconcile, queryRoute, listValues, collectionIdentity, tabSignature,
+  const api = { fileIcon, matchedParts, fieldValue, setField, serialize, localRoute, reconcile, queryRoute, listValues, collectionIdentity, tabSignature,
     emptyMetadata, restoreMetadata, metadataKey, gestureStart, gestureMove, gestureEnd };
   if (typeof module === 'object' && module.exports) module.exports = api;
   else {

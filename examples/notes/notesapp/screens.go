@@ -9,6 +9,7 @@ import (
 	"github.com/DonaldMurillo/gofastr-native/behavior"
 	"github.com/DonaldMurillo/gofastr-native/device/files"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesbackup"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesscreens"
 	"github.com/DonaldMurillo/gofastr-native/mobilehost"
 	"github.com/DonaldMurillo/gofastr-native/mobileui"
@@ -25,7 +26,11 @@ func BuildScreensWithPlatform(dataDir, origin string, platform mobileui.Platform
 		if err != nil {
 			return err
 		}
-		screens, err := notesscreens.New(service, attachments)
+		backups, err := notesbackup.New(filepath.Join(dataDir, "mobile-backups"), service, attachments)
+		if err != nil {
+			return err
+		}
+		screens, err := notesscreens.NewWithFeatures(service, attachments, notesscreens.Features{Backups: backups})
 		if err != nil {
 			return err
 		}

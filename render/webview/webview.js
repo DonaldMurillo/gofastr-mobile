@@ -549,6 +549,10 @@
       toggle.setAttribute('aria-pressed', String(!!state.selecting));
       toggle.disabled = state.busy || !!state.queryPending || state.uncertain || modalOpen();
     }
+    for (const control of state.root.querySelectorAll('[data-gfw-select-loaded], [data-gfw-clear-selection]')) {
+      control.hidden = !state.selecting;
+      control.disabled = state.busy || !!state.queryPending || state.uncertain || modalOpen() || (control.hasAttribute('data-gfw-clear-selection') && !state.selected.length);
+    }
   };
 
   const persistTabs = config => {
@@ -829,8 +833,7 @@
     if (disclosure) disclosure.open = true;
   }, true);
 
-  document.addEventListener('toggle', event => {
-    const menu = event.target;
+  const positionMenu = menu => {
     if (!menu.matches?.('[data-gfw-row-menu], [data-gfw-header-menu]') || !menu.open) return;
     for (const other of document.querySelectorAll('[data-gfw-row-menu], [data-gfw-header-menu]')) {
       if (other !== menu) other.open = false;
@@ -844,12 +847,28 @@
     const top = Math.max(12, root?.querySelector('.gfm-nav')?.getBoundingClientRect().bottom ?? 12);
     const bottom = Math.min(window.innerHeight - 12, tabs?.getBoundingClientRect().top ?? window.innerHeight - 12);
     controls.style.position = 'fixed';
+    controls.style.boxSizing = 'border-box';
+    controls.style.minWidth = '0';
+    controls.style.maxWidth = Math.max(0, window.innerWidth - 24) + 'px';
+    controls.style.width = 'max-content';
+    controls.style.width = Math.min(Math.max(160, controls.offsetWidth), Math.max(0, window.innerWidth - 24)) + 'px';
     controls.style.maxHeight = Math.max(44, bottom - top - 16) + 'px';
     controls.style.overflowY = 'auto';
     controls.style.insetInlineEnd = 'auto';
     controls.style.bottom = 'auto';
     controls.style.top = Math.max(top + 8, Math.min(bounds.bottom + 4, bottom - controls.offsetHeight - 8)) + 'px';
     controls.style.left = Math.max(12, Math.min(bounds.right - controls.offsetWidth, window.innerWidth - controls.offsetWidth - 12)) + 'px';
+  };
+  document.addEventListener('toggle', event => positionMenu(event.target), true);
+  // Native details toggle events are queued. Position in the summary click
+  // itself so the next pointer or keyboard activation sees the final bounds.
+  document.addEventListener('click', event => {
+    const summary = event.target.closest?.('summary');
+    const menu = summary?.parentElement;
+    if (event.defaultPrevented || !menu?.matches('[data-gfw-row-menu], [data-gfw-header-menu]')) return;
+    event.preventDefault();
+    menu.open = !menu.open;
+    if (menu.open) positionMenu(menu);
   }, true);
 
   document.addEventListener('input', (event) => {
@@ -933,6 +952,12 @@
       if (state.busy || state.queryPending || state.uncertain) return;
       state.selecting = !state.selecting;
       if (!state.selecting) state.selected = [];
+      syncSelection(state);
+      return;
+    }
+    if (event.target.closest('[data-gfw-select-loaded], [data-gfw-clear-selection]')) {
+      if (state.busy || state.queryPending || state.uncertain || modalOpen()) return;
+      state.selected = event.target.closest('[data-gfw-clear-selection]') ? [] : components.reconcile(state.config.list.rows.map(row => row.id), state.config.list.rows, state.config.list.selection.maximum);
       syncSelection(state);
       return;
     }
@@ -1058,6 +1083,7 @@
     else if (outcome.kind === 'menu') {
       const menu = row.querySelector('[data-gfw-row-menu]');
       menu.open = true;
+      positionMenu(menu);
       sides[outcome.side][0]?.button.focus({ preventScroll: true });
     }
   };

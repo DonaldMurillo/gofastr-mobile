@@ -77,6 +77,7 @@ type runtimeSession struct {
 	watchWorker     bool
 	uncertain       bool
 	privacyRevoked  bool
+	restoreBaseline behavior.Values
 }
 
 type runtimeAction struct {
@@ -272,6 +273,7 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 					return reply
 				}
 				session.editor.Checkpoint(snapshot.Baseline)
+				session.restoreBaseline = nil
 			}
 		}
 		reply.Error = runtime.persist(ctx, session)
@@ -359,6 +361,7 @@ func (runtime *Runtime) open(ctx context.Context, command Command, contract Cont
 					}
 				}
 				draft.Current = behavior.Values(current)
+				session.restoreBaseline = behavior.Values(editorValues(screen, draft.Baseline))
 				if err := session.editor.Restore(draft); err != nil {
 					rollbackOwner()
 					reply.Error = commandFailure("draft", "The local draft could not be restored safely.")
@@ -471,7 +474,7 @@ func (runtime *Runtime) action(ctx context.Context, session *runtimeSession, com
 		return reply
 	}
 	session.actions[command.RequestID], session.active = record, true
-	screen := session.screen
+	screen := runtime.actionScreen(session)
 	session.mu.Unlock()
 	if definition.Commit {
 		runtime.mutations.Lock()
@@ -526,6 +529,7 @@ func (runtime *Runtime) complete(ctx context.Context, session *runtimeSession, c
 		}
 		session.editor.Complete(result, currentEditorValues(session, command.Values))
 		if record.response.Saved != nil && record.failure == nil {
+			session.restoreBaseline = nil
 			saved := record.response.Saved
 			form := *session.screen.Form
 			form.Fields = append([]Field(nil), form.Fields...)
@@ -610,6 +614,10 @@ func (runtime *Runtime) persist(ctx context.Context, session *runtimeSession) (f
 	if session.draftKey != "" && runtime.draftOwners[session.draftKey] != snapshot.InstanceID {
 		session.draftStored = false
 		return commandFailure("superseded", "This draft was opened in a newer screen. Reopen this editor before making further changes.")
+	}
+	if session.restoreBaseline != nil {
+		snapshot.Baseline = maps.Clone(session.restoreBaseline)
+		snapshot.Dirty = !maps.Equal(snapshot.Current, snapshot.Baseline)
 	}
 	if session.nextDraftKey != "" {
 		if owner := runtime.draftOwners[session.nextDraftKey]; owner != "" && owner != snapshot.InstanceID {

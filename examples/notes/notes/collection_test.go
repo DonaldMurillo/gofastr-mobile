@@ -7,6 +7,47 @@ import (
 	"time"
 )
 
+type partialRepository struct {
+	recordingRepository
+	items  map[string]Note
+	writes int
+}
+
+func (repository *partialRepository) Owner(context.Context) (string, error) { return "owner", nil }
+func (repository *partialRepository) Get(_ context.Context, id string) (Note, error) {
+	item, ok := repository.items[id]
+	if !ok {
+		return Note{}, ErrNotFound
+	}
+	return item, nil
+}
+func (repository *partialRepository) SaveMetadata(_ context.Context, id string, details Details) (Note, error) {
+	repository.writes++
+	if repository.writes == 2 {
+		return Note{}, errors.New("storage unavailable")
+	}
+	item := repository.items[id]
+	item.Details = details
+	repository.items[id] = item
+	return item, nil
+}
+
+func TestPartialBulkWriteReportsProgressAndUndoPreservesNewText(t *testing.T) {
+	repository := &partialRepository{items: map[string]Note{"one": {ID: "one", Title: "One", Body: "Original"}, "two": {ID: "two", Title: "Two"}}}
+	service := New(repository)
+	result, err := service.Change(context.Background(), []string{"one", "two"}, Change{Kind: "archive"})
+	if err == nil || result.Count != 1 || result.Undo == "" || !repository.items["one"].Archived || repository.items["two"].Archived {
+		t.Fatalf("partial result: %+v %v", result, err)
+	}
+	first := repository.items["one"]
+	first.Body = "Edited after bulk action"
+	repository.items["one"] = first
+	undone, err := service.Undo(context.Background(), result.Undo)
+	if err != nil || undone.Count != 1 || repository.items["one"].Archived || repository.items["one"].Body != "Edited after bulk action" {
+		t.Fatal("undo lost partial progress or newer text")
+	}
+}
+
 type metadataRepository struct {
 	recordingRepository
 	writes int

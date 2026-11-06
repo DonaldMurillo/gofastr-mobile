@@ -112,7 +112,7 @@ func (runtime *Runtime) respond(ctx context.Context, session *runtimeSession, co
 	record := &runtimeAction{action: fingerprint, values: maps.Clone(command.Values), sourceAction: pending.action, inputValues: maps.Clone(values), selected: slices.Clone(command.Selected), effectIDs: make(map[string]string), resolves: pending.id}
 	session.actions[command.RequestID], session.active, pending.resolved = record, true, true
 	definition, routeName := pending.definition, session.screen.Route
-	screen := session.screen
+	screen := runtime.actionScreen(session)
 	session.mu.Unlock()
 	var result Response
 	if outcome.Cancelled {

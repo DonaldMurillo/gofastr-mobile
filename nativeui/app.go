@@ -211,6 +211,16 @@ func (app *App) actionRequest(ctx context.Context, destination, action string, v
 	if err == nil {
 		_, request, err = app.resolve(destination, request.Values)
 	}
+	baseline := screen.Form
+	if previous != nil {
+		baseline = previous.Form
+	}
+	if baseline != nil {
+		request.Baseline = make(map[string]string)
+		for _, field := range baseline.Fields {
+			request.Baseline[field.Key] = field.Value
+		}
+	}
 	return screen, request, err
 }
 

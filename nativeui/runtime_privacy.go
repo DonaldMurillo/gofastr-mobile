@@ -39,6 +39,7 @@ func (runtime *Runtime) scrubProtected(session *runtimeSession) {
 	}
 	session.screen = Screen{Route: route, Title: "Locked"}
 	session.editor = nil
+	session.restoreBaseline = nil
 	session.actions = make(map[string]*runtimeAction)
 	session.effects = make(map[string]EffectReceipt)
 }

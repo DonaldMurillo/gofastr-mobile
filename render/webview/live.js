@@ -33,7 +33,11 @@
         if (!row.disabled && row.destination) link.setAttribute('href', row.destination);
         if (row.disabled) link.setAttribute('aria-disabled', 'true');
         const copy = element('div', '', { class: 'gfm-row-copy' });
-        copy.append(element('h2', row.title), element('p', row.subtitle));
+        for (const [tag, text, matches] of [['h2', row.title, row.titleMatches], ['p', row.subtitle, row.subtitleMatches]]) {
+          const line = element(tag);
+          for (const part of window.__gofastr_components.matchedParts(text, matches || [])) line.append(element(part.matched ? 'mark' : 'span', part.text));
+          copy.append(line);
+        }
         if (row.metadata) copy.append(element('span', row.metadata, { class: 'gfw-row-metadata' }));
         if (row.icon) link.append(window.__gofastr_components.fileIcon(document, row.icon));
         link.append(copy); content.append(link);

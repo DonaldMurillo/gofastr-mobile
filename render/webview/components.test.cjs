@@ -3,6 +3,12 @@ const { test } = require('node:test');
 const components = require('./components.js');
 
 const base = 'https://app.test/records';
+test('search highlighting indexes Unicode code points and keeps markup as text', () => {
+  assert.deepEqual(components.matchedParts('😀 <script>', [{start: 2, end: 10}]), [{text: '😀 ', matched: false}, {text: '<script>', matched: true}]);
+  for (const matches of [[{start: -1, end: 2}], [{start: 0, end: 100}], [{start: 1, end: 2}, {start: 0, end: 1}]]) {
+    assert.deepEqual(components.matchedParts('safe', matches), [{text: 'safe', matched: false}]);
+  }
+});
 const config = () => ({ root: '/records', route: '/records?q=old&tag=work&page=2&selected=%5B%22one%22%5D',
   routes: [{ path: '/records', actions: ['bulk', 'pin', 'trash'] }, { path: '/records/{id}', actions: ['save'] }, { path: '/files', actions: [] }],
   tabs: [{ id: 'records', route: '/records' }, { id: 'files', route: '/files' }],

@@ -45,7 +45,7 @@ func (runtime *Runtime) presentService(ctx context.Context, session *runtimeSess
 		reply.Error = commandFailure("conflict", "Service inputs changed before admission. Choose the action again.")
 		return
 	}
-	screen := session.screen
+	screen := runtime.actionScreen(session)
 	session.active = true
 	session.mu.Unlock()
 	_, _, err = runtime.app.actionRequest(ctx, screen.Route, record.sourceAction, values, &screen)

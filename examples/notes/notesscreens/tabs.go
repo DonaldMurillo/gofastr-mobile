@@ -36,7 +36,7 @@ func tabShell(routes []nativeui.Route) []nativeui.Route {
 func settingsRoute() nativeui.Route {
 	return nativeui.Route{Path: "/settings", Screen: func(context.Context, nativeui.Request) (nativeui.Screen, error) {
 		return nativeui.Screen{Title: "Settings", LargeTitle: true, List: &nativeui.List{
-			Header: "On this device", Footer: "Notes and attachments stay in this installation. Reminder fields are saved independently: use Schedule, Cancel or Check status explicitly on a saved note. Device support and permission vary; no prompt appears just by opening Notes. Audio recording is explicit, up to 60 seconds / 512 KiB. Undo lasts 30 seconds and does not survive a restart. Live changes are process-local, not cloud sync.",
+			Header: "On this device", Footer: "Saved notes and attachments belong to this installation. Drafts are separate from saved notes. Opening Settings does not request device permissions.",
 			Rows: []nativeui.Row{
 				{ID: "behaviors", Title: "Behaviors", Subtitle: "Shared Go interactions", Destination: "/behaviors"},
 				{ID: "about", Title: "About Notes", Subtitle: "One application, shared Go screens", Destination: "/settings/about"},
@@ -47,7 +47,7 @@ func settingsRoute() nativeui.Route {
 
 func aboutRoute(path, closeKind string) nativeui.Route {
 	return nativeui.Route{Path: path, Screen: func(context.Context, nativeui.Request) (nativeui.Screen, error) {
-		return nativeui.Screen{Title: "About Notes", Text: "Your notes stay on this device.\n\nNotes, attachments, and unsaved drafts belong to this installation. A draft is separate from a saved note.\n\nReminder fields do not schedule a notification. Choose Schedule reminder on a saved note, then check the device outcome.\n\nThe same Go screens and actions run through native iOS, native Android, or the mobile WebView renderer.",
+		return nativeui.Screen{Title: "About Notes", Text: "Your notes stay on this device.\n\nSaved notes, attachments, and unsaved drafts belong to this installation. There is no cloud sync. A draft is separate from a saved note.\n\nChoose Schedule reminder on a saved note to request a notification. Saving reminder fields alone does not schedule one.\n\nUndo is available for 30 seconds and ends when Notes restarts. Moving a note to Trash keeps its attachments so you can restore them together.",
 			Actions: []nativeui.Action{{ID: "close", Label: "Done", Primary: true}}}, nil
 	}, Actions: map[string]nativeui.Handle{"close": navigate(closeKind, "")}}
 }

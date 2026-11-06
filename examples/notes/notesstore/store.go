@@ -93,6 +93,9 @@ func collectionOptions(query notes.Query) crud.ListOptions {
 }
 
 func (store *Store) Collection(ctx context.Context, query notes.Query) (notes.Collection, error) {
+	if query.Order == "relevance" && query.Search != "" {
+		return store.relevantCollection(ctx, query)
+	}
 	if query.After != nil {
 		anchorQuery := query
 		anchorQuery.After = nil
@@ -180,32 +183,47 @@ func (store *Store) SaveMetadata(ctx context.Context, id string, details notes.D
 
 // ImportShared keeps the deduplication receipt and text in one database write.
 func (store *Store) ImportShared(ctx context.Context, source, title, body string) (notes.Note, bool, error) {
+	return store.importSource(ctx, "shared", source, map[string]any{"title": title, "body": body})
+}
+
+func (store *Store) sourceID(ctx context.Context, namespace, source string) (string, error) {
 	owner, err := store.Owner(ctx)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256([]byte("notes." + namespace + ".v1\x00" + owner + "\x00" + source))
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func (store *Store) findSource(ctx context.Context, namespace, source string) (notes.Note, bool, bool, error) {
+	identifier, err := store.sourceID(ctx, namespace, source)
+	if err != nil {
+		return notes.Note{}, false, false, err
+	}
+	rows, err := store.handler.ListAll(ctx, crud.ListOptions{Limit: 1, Filters: []filter.ParsedFilter{
+		{Field: "source_id", Op: filter.OpEq, Value: identifier},
+	}})
+	if err != nil || len(rows) == 0 {
+		return notes.Note{}, false, false, err
+	}
+	note, err := decode(rows[0])
+	complete := boolean(rows[0]["source_complete"]) || boolean(rows[0]["sourceComplete"])
+	return note, complete, true, err
+}
+
+func (store *Store) importSource(ctx context.Context, namespace, source string, values map[string]any) (notes.Note, bool, error) {
+	identifier, err := store.sourceID(ctx, namespace, source)
 	if err != nil {
 		return notes.Note{}, false, err
 	}
-	digest := sha256.Sum256([]byte("notes.shared.v1\x00" + owner + "\x00" + source))
-	identifier := hex.EncodeToString(digest[:])
-	find := func() (notes.Note, bool, bool, error) {
-		rows, err := store.handler.ListAll(ctx, crud.ListOptions{Limit: 1, Filters: []filter.ParsedFilter{
-			{Field: "source_id", Op: filter.OpEq, Value: identifier},
-		}})
-		if err != nil || len(rows) == 0 {
-			return notes.Note{}, false, false, err
-		}
-		note, err := decode(rows[0])
-		complete := boolean(rows[0]["source_complete"]) || boolean(rows[0]["sourceComplete"])
-		return note, complete, true, err
-	}
-	if note, complete, found, err := find(); err != nil || found {
+	if note, complete, found, err := store.findSource(ctx, namespace, source); err != nil || found {
 		return note, complete, err
 	}
-	row, err := store.handler.CreateOne(crud.WithServerWrites(ctx), map[string]any{
-		"source_id": identifier, "title": title, "body": body,
-	})
+	values["source_id"] = identifier
+	row, err := store.handler.CreateOne(crud.WithServerWrites(ctx), values)
 	if err != nil {
 		// A concurrent importer may have won the unique source receipt.
-		if note, complete, found, lookupErr := find(); lookupErr == nil && found {
+		if note, complete, found, lookupErr := store.findSource(ctx, namespace, source); lookupErr == nil && found {
 			return note, complete, nil
 		}
 		return notes.Note{}, false, err

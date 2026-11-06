@@ -17,6 +17,7 @@ import (
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notedevices"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp/application"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesbackup"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesscreens"
 	"github.com/DonaldMurillo/gofastr-native/mobilehost"
 	"github.com/DonaldMurillo/gofastr-native/nativeui"
@@ -66,7 +67,12 @@ func Start(dataDir string) error {
 		_ = shared.App.Shutdown(context.Background())
 		return err
 	}
-	screens, err := notesscreens.NewWithDevices(shared.Service, attachments, devices)
+	backups, err := notesbackup.New(filepath.Join(dataDir, "mobile-backups"), shared.Service, attachments)
+	if err != nil {
+		_ = shared.App.Shutdown(context.Background())
+		return err
+	}
+	screens, err := notesscreens.NewWithFeatures(shared.Service, attachments, notesscreens.Features{Devices: devices, Backups: backups})
 	if err != nil {
 		_ = shared.App.Shutdown(context.Background())
 		return err

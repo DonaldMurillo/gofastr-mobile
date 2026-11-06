@@ -127,14 +127,8 @@ func (service *Service) SaveDetails(ctx context.Context, id, title, body string,
 
 func (service *Service) save(ctx context.Context, id, title, body string, details *Details) (Note, error) {
 	title = strings.TrimSpace(title)
-	if title == "" {
-		return Note{}, &ValidationError{Message: "Give your note a title."}
-	}
-	if utf8.RuneCountInString(title) > 200 {
-		return Note{}, &ValidationError{Message: "Titles must be 200 characters or fewer."}
-	}
-	if len(body) > 1<<20 {
-		return Note{}, &ValidationError{Message: "This note is too long. Keep it under 1 MB."}
+	if err := ValidateText(title, body); err != nil {
+		return Note{}, err
 	}
 	if details == nil {
 		note, err := service.repository.Save(ctx, id, title, body)
@@ -160,6 +154,24 @@ func (service *Service) save(ctx context.Context, id, title, body string, detail
 		service.AttachmentsChanged(ctx)
 	}
 	return note, err
+}
+
+// ValidateText checks the same limits for editor saves and portable imports.
+func ValidateText(title, body string) error {
+	if !utf8.ValidString(title) || !utf8.ValidString(body) {
+		return &ValidationError{Message: "Use valid UTF-8 text for the title and note."}
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return &ValidationError{Message: "Give your note a title."}
+	}
+	if utf8.RuneCountInString(title) > 200 {
+		return &ValidationError{Message: "Titles must be 200 characters or fewer."}
+	}
+	if len(body) > 1<<20 {
+		return &ValidationError{Message: "This note is too long. Keep it under 1 MB."}
+	}
+	return nil
 }
 
 // ValidateDetails rejects unsupported tags and noncanonical calendar metadata.

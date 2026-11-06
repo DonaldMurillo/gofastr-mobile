@@ -48,6 +48,9 @@ func collectionQuery(values map[string]string) (notes.Query, error) {
 	}
 	if query.Order == "" {
 		query.Order = "recent"
+		if query.Search != "" {
+			query.Order = "relevance"
+		}
 	}
 	page := values["page"]
 	if previous := values["page_scope"]; previous != "" && previous != queryScope(query, false) {
@@ -98,7 +101,7 @@ func collectionScreen(service *notes.Service) nativeui.Render {
 			count = "1 note"
 		}
 		list := &nativeui.List{
-			Header: "All notes", Footer: count + " · Stored on this device",
+			Header: "All notes", Footer: count + " shown · Stored on this device",
 			Empty:     "No notes yet.\nTap New note to start writing.",
 			SearchKey: "search", SearchPlaceholder: "Search your notes", Refreshable: true,
 			Selection: &nativeui.Selection{Key: "selected", Selected: []string{}, Maximum: notes.MaximumSelection},
@@ -107,7 +110,7 @@ func collectionScreen(service *notes.Service) nativeui.Render {
 					{Value: "active", Label: "Active"}, {Value: "archived", Label: "Archived"}, {Value: "trash", Label: "Trash"},
 				}},
 				{Key: "tag", Label: "Filter by tag", Kind: "select", Value: query.Tag, Options: tagOptions("All tags")},
-				{Key: "order", Label: "Sort", Kind: "select", Value: query.Order, Options: []nativeui.Option{{Value: "recent", Label: "Recently updated"}, {Value: "title", Label: "Title"}}},
+				{Key: "order", Label: "Sort", Kind: "select", Value: query.Order, Options: []nativeui.Option{{Value: "relevance", Label: "Best match"}, {Value: "recent", Label: "Recently updated"}, {Value: "title", Label: "Title"}}},
 			},
 			Rows:   make([]nativeui.Row, 0, len(items.Notes)),
 			Paging: &nativeui.Paging{Key: "page", Label: "Load more"},
@@ -118,16 +121,18 @@ func collectionScreen(service *notes.Service) nativeui.Render {
 			list.Header, list.Empty = "Trash", "Trash is empty. Files remain stored when a note is moved here."
 		}
 		if query.Search != "" {
-			list.Header, list.Empty = "Search results", "No matching notes.\nTry another word."
+			list.Header, list.Empty = "Search results", "No matching notes in this view.\nTry another word or change the filters."
+			if query.Order == "relevance" {
+				list.Footer += " · Titles ranked first within each 100-match group"
+			}
+		} else if query.Tag != "" {
+			list.Header = "Tagged " + query.Tag
+			list.Empty = "No notes with this tag in the current view.\nChange the tag or view to see other notes."
 		}
 		visible := make(map[string]bool, len(items.Notes))
 		for _, item := range items.Notes {
 			visible[item.ID] = true
-			subtitle := strings.Join(strings.Fields(item.Body), " ")
-			preview := []rune(subtitle)
-			if len(preview) > 160 {
-				subtitle = string(preview[:160]) + "…"
-			}
+			subtitle := notes.SearchSnippet(item.Body, query.Search)
 			metadata := ""
 			if subtitle == "" {
 				subtitle = "Open note to read"
@@ -152,6 +157,7 @@ func collectionScreen(service *notes.Service) nativeui.Render {
 				trailing = []nativeui.RowAction{{ID: "restore", Label: "Restore"}}
 			}
 			list.Rows = append(list.Rows, nativeui.Row{ID: item.ID, Title: item.Title, Subtitle: subtitle, Metadata: metadata,
+				TitleMatches: rowMatches(item.Title, query.Search), SubtitleMatches: rowMatches(subtitle, query.Search),
 				Destination:    "/notes/" + url.PathEscape(item.ID),
 				LeadingActions: []nativeui.RowAction{{ID: "pin", Label: pinLabel, FullSwipe: true}}, TrailingActions: trailing,
 			})
@@ -167,9 +173,13 @@ func collectionScreen(service *notes.Service) nativeui.Render {
 			}
 		}
 		encodedSelection, _ := json.Marshal(list.Selection.Selected)
+		if len(list.Selection.Selected) > 0 {
+			list.Header = fmt.Sprintf("%d selected · %s", len(list.Selection.Selected), list.Header)
+		}
 		request.Values["selected"] = string(encodedSelection)
 		if items.Next != "" {
 			list.Paging.Next = items.Next
+			list.Footer += " · More available"
 		}
 		actions := []nativeui.Action{{ID: "new", Label: "New note", Icon: nativeui.IconCompose},
 			{ID: "about", Label: "About Notes", Icon: nativeui.IconInfo, Leading: true},
@@ -238,20 +248,22 @@ func collectionAction(service *notes.Service, action string) nativeui.Handle {
 			return applyCollection(ctx, service, request, ids, action, "")
 		}
 		presentation := nativeui.Presentation{ID: action, Kind: nativeui.PresentationConfirmation,
-			Title: "Archive selected notes?", Message: "Notes remain on this device. Each note is saved separately; this is not an atomic transaction.",
+			Title: "Archive selected notes?", Message: fmt.Sprintf("Archive %d selected notes? You can undo this change for 30 seconds or unarchive them later.", len(ids)),
 			Dismissible: true, Commit: true, Choices: []nativeui.PresentationChoice{{ID: "apply", Label: "Apply"}, {ID: "cancel", Label: "Cancel", Role: "cancel"}},
 		}
 		if action == "trash" {
 			presentation.Title = "Move notes to Trash?"
-			presentation.Message = "Notes will be hidden from Active and Archived, not erased. Attachments are kept. Undo is available for 30 seconds; you can also restore notes from Trash. Notes are saved individually."
+			presentation.Message = fmt.Sprintf("Move %d selected notes to Trash? Their attachments are kept. Undo is available for 30 seconds, and you can restore the notes from Trash later.", len(ids))
 			presentation.Choices[0].Label, presentation.Choices[0].Role = "Move to Trash", "destructive"
 		} else if action == "tag" {
 			presentation.Kind, presentation.Title = nativeui.PresentationDialog, "Tag selected notes"
+			presentation.Message = fmt.Sprintf("Choose one tag for %d selected notes. No tag removes the current tag. You can undo this change for 30 seconds.", len(ids))
 			presentation.Selection = &nativeui.Selection{Min: 1, Max: 1, Selected: []string{}, Options: []nativeui.SelectionOption{
 				{ID: "none", Label: "No tag"}, {ID: "ideas", Label: "Ideas"}, {ID: "work", Label: "Work"}, {ID: "personal", Label: "Personal"}, {ID: "shared", Label: "Shared (not configured)", Disabled: true},
 			}}
 		} else if request.Values["view"] == "archived" {
 			presentation.Title = "Unarchive selected notes?"
+			presentation.Message = fmt.Sprintf("Move %d selected notes back to Active?", len(ids))
 		}
 		return nativeui.Result{Presentation: &presentation}, nil
 	}
@@ -296,5 +308,16 @@ func mutationResult(result notes.Mutation, err error, message string) (nativeui.
 	if err != nil {
 		announcement += " · Some notes could not be changed. Refresh and review before retrying."
 	}
+	if err != nil {
+		return nativeui.Result{Announcement: announcement}, nil
+	}
 	return nativeui.Result{Announcement: announcement, Haptic: "success"}, nil
+}
+
+func rowMatches(text, term string) []nativeui.TextRange {
+	var result []nativeui.TextRange
+	for _, match := range notes.Matches(text, term) {
+		result = append(result, nativeui.TextRange{Start: match.Start, End: match.End})
+	}
+	return result
 }

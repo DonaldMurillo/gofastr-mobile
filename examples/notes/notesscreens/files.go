@@ -18,7 +18,7 @@ import (
 
 func fileRoutes(service *notes.Service, store *files.Store) []nativeui.Route {
 	routes := []nativeui.Route{{Path: "/files", Screen: func(ctx context.Context, request nativeui.Request) (nativeui.Screen, error) {
-		list := &nativeui.List{Header: "From recent notes", Footer: "Private attachments · Stored on this device", Empty: "Your files belong with your ideas.\nAdd a photo, recording or document inside a note.", Rows: []nativeui.Row{}}
+		list := &nativeui.List{Header: "From recent notes", Footer: "Private attachments · Stored on this device", Empty: "No attachments yet.\nOpen a saved note and choose Add file, or record audio inside it.", Rows: []nativeui.Row{}}
 		if store != nil {
 			items, err := service.List(ctx, "")
 			if err != nil {

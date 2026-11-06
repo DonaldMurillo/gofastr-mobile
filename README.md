@@ -107,6 +107,9 @@ also use shared Go requests with Android and iOS adapters. The Go-only
 The [Notes integrations](docs/notes-device-features.md) add reviewed shared
 imports, explicitly selected note widgets, and biometric-protected text notes.
 
+[Portable Notes workflows](docs/notes-portable-workflows.md) add reviewed backup
+and restore, matching search passages, bulk selection, and guarded editor saves.
+
 The same Notes app now exercises [mobile components](docs/mobile-components.md):
 typed toggles/selects/date/time, filters and accumulated Load more, stable-ID
 multi-selection and bulk actions with undo, Notes/Files/Settings tabs, and row

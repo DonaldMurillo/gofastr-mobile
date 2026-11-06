@@ -98,6 +98,15 @@ type Row struct {
 	Disabled        bool        `json:"disabled,omitempty"`
 	LeadingActions  []RowAction `json:"leadingActions,omitempty"`
 	TrailingActions []RowAction `json:"trailingActions,omitempty"`
+	TitleMatches    []TextRange `json:"titleMatches,omitempty"`
+	SubtitleMatches []TextRange `json:"subtitleMatches,omitempty"`
+}
+
+// TextRange is an optional visual hint into plain text, indexed by Unicode
+// code points. Renderers without styled text keep displaying the original text.
+type TextRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
 }
 
 type RowAction struct {
@@ -155,6 +164,9 @@ type Request struct {
 	Route  string
 	Params map[string]string
 	Values map[string]string
+	// Baseline is the immutable form baseline admitted by the runtime. Clients
+	// cannot replace it by submitting values with the same names.
+	Baseline map[string]string
 	// Service and ServiceValues are immutable admitted inputs, populated only
 	// for a device-service continuation. Values may contain newer editor text.
 	Service       *ServiceRequest

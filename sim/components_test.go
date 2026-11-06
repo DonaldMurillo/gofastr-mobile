@@ -203,7 +203,7 @@ func runCollectionInteractions(t *testing.T, service *notes.Service, userContext
 		chromedp.Poll(`!document.querySelector('[data-gfw-select]:checked')`, nil))
 	check(chromedp.Evaluate(fmt.Sprintf(`document.querySelector(%s).scrollIntoView({block: 'center'})`, mustJSON(rowSelector)), nil),
 		chromedp.Click(rowSelector+` summary`, chromedp.ByQuery),
-		chromedp.Poll(fmt.Sprintf(`document.querySelector(%s + ' details[open] > div')?.getBoundingClientRect().bottom <= document.querySelector('[aria-label="App tabs"]').getBoundingClientRect().top`, mustJSON(rowSelector)), nil),
+		chromedp.Poll(fmt.Sprintf(`(() => {const menu=document.querySelector(%s + ' details[open] > div');if(!menu)return false;const rect=menu.getBoundingClientRect();return rect.left>=8 && rect.right<=innerWidth-8 && rect.bottom<=document.querySelector('[aria-label="App tabs"]').getBoundingClientRect().top;})()`, mustJSON(rowSelector)), nil),
 		chromedp.Click(rowSelector+` [data-gfw-row-action="pin"]`, chromedp.ByQuery),
 		chromedp.Poll(fmt.Sprintf(`document.querySelector(%s)?.textContent.includes('Pinned')`, mustJSON(rowSelector)), nil))
 	check(componentTouchSwipe(rowSelector, "right"),

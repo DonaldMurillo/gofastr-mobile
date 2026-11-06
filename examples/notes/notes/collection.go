@@ -95,7 +95,7 @@ func (service *Service) Collection(ctx context.Context, query Query) (Collection
 	query.Search = strings.TrimSpace(query.Search)
 	if utf8.RuneCountInString(query.Search) > 200 || !ValidTag(query.Tag) ||
 		(query.View != "" && query.View != "active" && query.View != "archived" && query.View != "trash") ||
-		(query.Order != "" && query.Order != "recent" && query.Order != "title") || query.Page < 0 || query.Page > MaximumRows/PageSize {
+		(query.Order != "" && query.Order != "recent" && query.Order != "title" && query.Order != "relevance") || query.Page < 0 || query.Page > MaximumRows/PageSize || !utf8.ValidString(query.Search) {
 		return Collection{}, &ValidationError{Message: "Choose valid note filters and page."}
 	}
 	repository, ok := service.repository.(CollectionRepository)

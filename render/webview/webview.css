@@ -156,3 +156,8 @@
 [data-gfw-live-status] { flex: 1 1 10rem; font-size: .75rem; color: var(--color-text-muted); }
 [data-gfw-screen][data-gfw-live-state="watching"] [data-gfw-live-controls] button { border: 0; padding: .25rem; background: transparent; font-size: .75rem; }
 [data-gfw-service] [hidden], [data-gfw-live-controls][hidden], [data-gfw-live-controls] [hidden] { display: none; }
+/* Search keeps authored text as text nodes in SSR and live reads. */
+.gfm-row mark { color: var(--color-text); background: color-mix(in srgb, var(--color-primary) 25%, var(--color-surface)); border-radius: .15em; padding: 0 .05em; }
+.gfw-collection-tools { flex-wrap: wrap; }
+[data-gfw-screen][data-gfw-selecting="true"] .gfm-fab { display: none; }
+[data-gfw-screen] .gfw-row[data-gfw-disabled="true"] .gfm-row { opacity: 1; }
