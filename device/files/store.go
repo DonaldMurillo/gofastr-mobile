@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/DonaldMurillo/gofastr-native/internal/privatefile"
 )
 
 const MaxStoredBytes = 16 << 20
@@ -35,6 +37,16 @@ func NewStore(directory string) (*Store, error) {
 		return nil, errors.New("files: a storage directory is required")
 	}
 	if err := os.MkdirAll(directory, 0700); err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(directory)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("files: storage must be a directory, not a symlink")
+	}
+	if err := privatefile.Harden(directory, true); err != nil {
 		return nil, err
 	}
 	return &Store{root: directory}, nil

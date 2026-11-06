@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/DonaldMurillo/gofastr-native/behavior"
+	"github.com/DonaldMurillo/gofastr-native/internal/privatefile"
 )
 
 func newFileStore(t *testing.T) (*behavior.FileDraftStore, string) {
@@ -41,7 +43,7 @@ func TestFileDraftStorePersistsOwnerOnlyHashedAtomicFiles(t *testing.T) {
 	}
 	for path, permissions := range map[string]os.FileMode{root: 0o700, draftPath(root, key): 0o600} {
 		info, err := os.Stat(path)
-		if err != nil || info.Mode().Perm() != permissions {
+		if err != nil || privatefile.Check(path) != nil || runtime.GOOS != "windows" && info.Mode().Perm() != permissions {
 			t.Fatalf("permissions for %s = %v, %v", path, info, err)
 		}
 	}
@@ -327,12 +329,20 @@ func TestFileDraftTightensDirectoryAndRejectsSharedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(root)
-	if err != nil || info.Mode().Perm() != 0o700 {
+	if err != nil || privatefile.Check(root) != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 		t.Fatalf("existing directory was not tightened: %v, %v", info, err)
 	}
 	snapshot := newEditor(t, nil).Snapshot()
 	if err := store.Put(ctx, "key", snapshot); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		// Windows ACL widening and rejection are exercised in privatefile's
+		// Windows tests; chmod cannot grant another Windows user access.
+		if err := privatefile.Check(draftPath(root, "key")); err != nil {
+			t.Fatal(err)
+		}
+		return
 	}
 	if err := os.Chmod(draftPath(root, "key"), 0o644); err != nil {
 		t.Fatal(err)

@@ -20,7 +20,7 @@ import (
 )
 
 func TestNativeCommandsPersistAcrossRestarts(t *testing.T) {
-	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
+	defer func() { _ = Stop(); owner.SetExtractor(nil) }()
 	if _, err := List(""); err == nil {
 		t.Fatal("command ran before startup")
 	}
@@ -69,7 +69,7 @@ func TestNativeCommandsPersistAcrossRestarts(t *testing.T) {
 }
 
 func TestRendererCommandDraftRecoveryAndReceipts(t *testing.T) {
-	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
+	defer func() { _ = Stop(); owner.SetExtractor(nil) }()
 	directory := t.TempDir()
 	if err := Start(directory); err != nil {
 		t.Fatal(err)
@@ -127,7 +127,7 @@ func TestRendererCommandDraftRecoveryAndReceipts(t *testing.T) {
 }
 
 func TestGoDefinedNativeScreenFlow(t *testing.T) {
-	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
+	defer func() { _ = Stop(); owner.SetExtractor(nil) }()
 	if _, err := Render(Root(), "{}"); err == nil {
 		t.Fatal("screen rendered before startup")
 	}
@@ -211,7 +211,7 @@ func TestNotesApplicationHasNoPlatformScreenSource(t *testing.T) {
 }
 
 func TestNativeNotesOpenInWebAndTerminal(t *testing.T) {
-	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
+	defer func() { _ = Stop(); owner.SetExtractor(nil) }()
 	directory := t.TempDir()
 	if err := Start(directory); err != nil {
 		t.Fatal(err)

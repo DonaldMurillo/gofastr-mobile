@@ -73,7 +73,7 @@ func doctor(r *runner, platform string) int {
 					fix: "Android Studio > Device Manager > Create device, or: avdmanager create avd -n gofastr -k \"system-images;android-35;google_apis;" + avdABI() + "\""})
 			}
 			jv, err := r.quietOutput(sdk.javac, "-version")
-			add(check{name: "javac", ok: err == nil, got: strings.TrimSpace(jv), fix: "install a JDK 17+ (Android Studio bundles one: export JAVA_HOME=\"/Applications/Android Studio.app/Contents/jbr/Contents/Home\")"})
+			add(check{name: "javac", ok: err == nil, got: strings.TrimSpace(jv), fix: "install a JDK 17+ and set JAVA_HOME to its directory"})
 		}
 	}
 

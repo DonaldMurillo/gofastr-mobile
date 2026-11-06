@@ -147,7 +147,7 @@ func runSharedMobileScreens(t *testing.T, platform mobileui.Platform) {
 		chromedp.Evaluate(`document.querySelector('input[type="search"]').form.requestSubmit()`, nil),
 		chromedp.Poll(`document.body.innerText.includes('One definition, two renderers')`, nil),
 		clickMobileAction("About Notes"),
-		chromedp.Poll(`document.body.innerText.includes('Your choice of renderer.')`, nil),
+		chromedp.Poll(`document.body.innerText.includes('Your notes stay on this device.')`, nil),
 		clickMobileAction("Done"),
 		waitForComponentPath("/notes"),
 		chromedp.Poll(`!!document.querySelector('[data-gfw-screen]').dataset.gfwInstance`, nil),
@@ -207,15 +207,7 @@ func setMobileField(selector, value string) chromedp.Action {
 
 func mobileScreensBrowser(t *testing.T, host *mobilehost.Host, android bool, options ...chromedp.ExecAllocatorOption) (context.Context, *stats) {
 	t.Helper()
-	executable := os.Getenv("SIM_CHROME")
-	if executable == "" {
-		for _, candidate := range []string{"/opt/pw-browsers/chromium-1243/chrome-linux64/chrome", "/usr/bin/google-chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"} {
-			if _, err := os.Stat(candidate); err == nil {
-				executable = candidate
-				break
-			}
-		}
-	}
+	executable := phoneBrowser()
 	if executable == "" {
 		t.Skip("no Chromium found; set SIM_CHROME")
 	}

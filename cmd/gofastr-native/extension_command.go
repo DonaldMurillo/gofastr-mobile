@@ -94,6 +94,12 @@ func printExtensionReport(output io.Writer, definitions []compiledExtension) {
 		for _, source := range manifest.IOS.Sources {
 			fmt.Fprintf(output, "  swift %s\n", source)
 		}
+		if manifest.Android != nil {
+			fmt.Fprintf(output, "  android factory %s\n", manifest.Android.Factory)
+			for _, source := range manifest.Android.Sources {
+				fmt.Fprintf(output, "  java %s\n", source)
+			}
+		}
 		fmt.Fprintf(output, "  webview %s\n", manifest.WebView.Script)
 	}
 	fmt.Fprintf(output, "PASS: %d compiled extensions; manifests/assets valid, no identity/capability/factory collisions\n", len(definitions))

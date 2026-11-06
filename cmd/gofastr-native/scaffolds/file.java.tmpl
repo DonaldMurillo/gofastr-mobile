@@ -1,0 +1,30 @@
+package dev.gofastr.nativeui;
+
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
+import org.json.JSONObject;
+import java.util.Collections;
+import java.util.Map;
+import java.util.function.Consumer;
+
+public final class {{.Factory}} implements Extensions.FileFactory {
+    public Map<String,String> capabilities(GofastrActivity host) { return Collections.singletonMap({{.Name}}, "available"); }
+    public void acquire(GofastrActivity host, JSONObject request, Consumer<JSONObject> result) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+        host.deviceServices().choose(intent, uri -> host.workers.execute(() -> {
+            JSONObject outcome;
+            try {
+                String name = "document", type = host.getContentResolver().getType(uri);
+                try (Cursor cursor = host.getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                    if (cursor != null && cursor.moveToFirst()) name = cursor.getString(0);
+                }
+                byte[] bytes = Services.read(host.getContentResolver().openInputStream(uri), Math.min(1048576, request.optInt("maxBytes")));
+                outcome = JSON.object("status", "completed", "file", Services.document(name, type == null ? "application/octet-stream" : type, bytes));
+            } catch (Exception e) { outcome = JSON.object("status", e instanceof SecurityException ? "denied" : "failed"); }
+            JSONObject settled = outcome;
+            host.main.post(() -> result.accept(settled));
+        }));
+    }
+}

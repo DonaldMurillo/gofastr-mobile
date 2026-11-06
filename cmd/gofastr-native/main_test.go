@@ -36,7 +36,7 @@ func gobindOut(t *testing.T) string {
 func gobindPackageOut(t *testing.T, pkg string) string {
 	t.Helper()
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "gobind")
+	bin := filepath.Join(dir, executableName("gobind"))
 	if out, err := exec.Command("go", "build", "-o", bin, "golang.org/x/mobile/cmd/gobind").CombinedOutput(); err != nil {
 		t.Skipf("cannot build gobind (offline module cache?): %v\n%s", err, out)
 	}
@@ -108,6 +108,7 @@ func TestJavaTemplateCompilesAgainstGeneratedBindings(t *testing.T) {
 	var files []string
 	for _, chunk := range strings.Split(string(stubs), "\n--- ")[1:] {
 		name, body, _ := strings.Cut(chunk, "\n")
+		name = strings.TrimSpace(name)
 		p := filepath.Join(src, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
@@ -345,6 +346,7 @@ func TestDryRunPlans(t *testing.T) {
 			}
 			// Placeholder SDK paths ('$ANDROID_HOME/...') print shell-quoted.
 			plan := strings.ReplaceAll(stdout.String(), "'", "")
+			plan = strings.ReplaceAll(strings.ReplaceAll(plan, ".exe", ""), ".bat", "")
 			for _, w := range tc.want {
 				if !strings.Contains(plan, w) {
 					t.Errorf("plan lacks %q:\n%s", w, plan)

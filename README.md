@@ -1,7 +1,7 @@
 # gofastr-native
 
 Go-authored application screens, shared behaviors, and typed device services,
-with native UIKit and mobile WebView renderers. Application screens and actions
+with native UIKit, native Android, and mobile WebView renderers. Application screens and actions
 are Go `nativeui` definitions. Apps write no Swift, HTML, CSS, or screen templates.
 The Notes example exercises the same definitions through either renderer.
 See [shared mobile screens](docs/shared-mobile-screens.md) and
@@ -61,6 +61,7 @@ point it at the checkout. `go.work` is gitignored.
 | `examples/notes/notesnative/` | Thin native binding: lifecycle, screen rendering/action dispatch, compatibility data commands, and centrally supplied installation identity. |
 | `cmd/gofastr-native/` | The CLI that builds the phone app and runs it on the iOS simulator or an Android emulator. No Xcode project, no Gradle. |
 | `render/ios/` | Ordinary, binding-independent UIKit renderer source, copied verbatim and compiled alongside the generated app entry. |
+| `render/android/` | Binding-independent Java renderer and device adapters, compiled against the Android SDK without Gradle. |
 | `render/webview/` | Generic adapter from the same Go mobile definitions to `mobileui` components, actions, and GoFastr navigation. |
 | `cmd/gofastr-native/templates/` | Library-owned WebView shells and minimal native binding/bootstrap glue, plist, and manifest. Apps only supply Go screens. |
 | `sim/` | A Chromium set up as a phone WebView (390x844 @3x, touch, phone UA). Every request is intercepted through the DevTools Fetch domain and answered by `mobilehost`; a MessagePort stands in for the native channel. |
@@ -96,7 +97,8 @@ Notes also exposes typed reminder scheduling/status/cancellation, rich note and
 attachment sharing, explicit clipboard writes, and private voice recordings.
 Collections now page in the owner-scoped repository beyond 200 records and
 watch confirmed changes from the shared service. See [device services and
-acceptance limits](docs/mobile-services.md). Native Android remains deferred.
+acceptance limits](docs/mobile-services.md). Native Android uses the same Go
+protocol and screens. See [Windows and Android builds and acceptance](docs/android.md).
 
 The same Notes app now exercises [mobile components](docs/mobile-components.md):
 typed toggles/selects/date/time, filters and accumulated Load more, stable-ID
@@ -116,7 +118,7 @@ Existing whole-GoFastr-web-app hosting remains independent and supported.
 reuses the same typed service without implementing the mobile screen contract.
 
 The native prototype uses Go-authored `nativeui` screens and a reusable, bundled
-UIKit renderer selected by `--renderer native`. Apps do not write Swift templates
+UIKit or Android renderer selected by `--renderer native`. Apps do not write platform templates
 or wire JSON. No GoFastr code or production dependencies changed.
 UIKit now composes services/installation data without mounting unused web
 screens. It still uses in-memory `App.Serve` for the complete framework lifecycle;
@@ -183,6 +185,20 @@ go run ./cmd/gofastr-native run --platform ios-sim \
 
 Android emulator (an Android SDK with build-tools, a platform, the NDK, the
 emulator and one AVD, plus a JDK 17+):
+
+Native Notes on Windows, from PowerShell:
+
+```powershell
+go run ./cmd/gofastr-native doctor --platform android-emu
+go run ./cmd/gofastr-native run --platform android-emu --renderer native --pkg ./examples/notes/notesnative --device Pixel_5_API_34 --microphone-usage 'Record private voice notes.' --url-scheme notes-demo --out dist/mobile/android-native
+```
+
+Use an AVD name listed by `doctor`, or an attached device's adb serial. Camera
+capture is enabled by default; recording requires the explicit microphone flag.
+Build-only uses `build` in place of `run`. The APK contains ARM64 and x86-64
+libraries and uses a debug signing key. See [Android implementation and tests](docs/android.md).
+
+The WebView host remains available:
 
 ```bash
 go run ./cmd/gofastr-native run --platform android-emu --pkg ./examples/notes/notesmobile --screenshot dist/android.png

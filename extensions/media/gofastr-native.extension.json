@@ -1,1 +1,1 @@
-{"name":"gofastr.media/v1","kind":"component","capabilities":["gofastr.media/v1"],"ios":{"factory":"GofastrMediaComponent","sources":["GofastrMedia.swift"]},"webview":{"script":"media.js"}}
+{"name":"gofastr.media/v1","kind":"component","capabilities":["gofastr.media/v1"],"ios":{"factory":"GofastrMediaComponent","sources":["GofastrMedia.swift"]},"android":{"factory":"GofastrMediaComponent","sources":["GofastrMediaComponent.java"]},"webview":{"script":"media.js"}}

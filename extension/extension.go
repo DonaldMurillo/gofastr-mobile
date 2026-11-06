@@ -44,11 +44,18 @@ type Manifest struct {
 	Kind         Kind     `json:"kind,omitempty"`
 	Capabilities []string `json:"capabilities"`
 	IOS          IOS      `json:"ios"`
+	Android      *Android `json:"android,omitempty"`
 	WebView      WebView  `json:"webview"`
 }
 
 // IOS names ordinary Swift sources and their compiled factory type.
 type IOS struct {
+	Factory string   `json:"factory"`
+	Sources []string `json:"sources"`
+}
+
+// Android names ordinary Java sources compiled with the host, without Gradle.
+type Android struct {
 	Factory string   `json:"factory"`
 	Sources []string `json:"sources"`
 }
@@ -98,6 +105,18 @@ func ParseManifest(content []byte) (Manifest, error) {
 
 // Validate checks names and package-relative asset paths, not OS permissions.
 func (manifest Manifest) Validate() error {
+	if manifest.Android != nil {
+		if !factoryPattern.MatchString(manifest.Android.Factory) || len(manifest.Android.Sources) == 0 || len(manifest.Android.Sources) > 16 {
+			return errors.New("extension: invalid Android adapter")
+		}
+		seen := map[string]bool{}
+		for _, source := range manifest.Android.Sources {
+			if !fs.ValidPath(source) || strings.Contains(source, "\\") || !strings.HasSuffix(source, ".java") || seen[source] {
+				return errors.New("extension: invalid Android source")
+			}
+			seen[source] = true
+		}
+	}
 	if manifest.Kind != "" && manifest.Kind != FileKind && manifest.Kind != ComponentKind {
 		return errors.New("extension: unknown adapter kind")
 	}
@@ -174,7 +193,11 @@ func New(definitions ...Definition) (*Registry, error) {
 			return nil, errors.New("extension: embedded manifest does not match definition")
 		}
 		assets := make(assetFiles)
-		for _, path := range append(append([]string(nil), manifest.IOS.Sources...), manifest.WebView.Script) {
+		paths := append(append([]string(nil), manifest.IOS.Sources...), manifest.WebView.Script)
+		if manifest.Android != nil {
+			paths = append(paths, manifest.Android.Sources...)
+		}
+		for _, path := range paths {
 			content, err := definition.Assets.ReadFile(path)
 			if err != nil || len(content) == 0 || len(content) > 512*1024 {
 				return nil, fmt.Errorf("extension: missing or oversized asset %q", path)
@@ -184,6 +207,11 @@ func New(definitions ...Definition) (*Registry, error) {
 		assets[ManifestName] = bytes.Clone(stored)
 		definition.Manifest.Capabilities = append([]string(nil), manifest.Capabilities...)
 		definition.Manifest.IOS.Sources = append([]string(nil), manifest.IOS.Sources...)
+		if manifest.Android != nil {
+			adapter := *manifest.Android
+			adapter.Sources = append([]string(nil), adapter.Sources...)
+			definition.Manifest.Android = &adapter
+		}
 		definition.Assets = assets
 		registry.definitions[manifest.Name] = definition
 		registry.ordered = append(registry.ordered, definition)

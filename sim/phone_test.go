@@ -12,10 +12,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromedp/cdproto"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/fetch"
@@ -149,8 +152,26 @@ func serve(ctx context.Context, h *mobilehost.Host, st *stats, android bool, ev 
 	}
 	if err := fetch.FulfillRequest(ev.RequestID, int64(resp.Status)).
 		WithResponseHeaders(entries).
-		WithBody(base64.StdEncoding.EncodeToString(resp.Body)).Do(exec); err != nil {
+		WithBody(base64.StdEncoding.EncodeToString(resp.Body)).Do(exec); err != nil && !retiredInterception(err) {
 		st.note("fulfill %s: %v", u.Path, err)
+	}
+}
+
+// Navigation can abort a paused stylesheet before its response reaches CDP.
+// That request no longer exists; other protocol and host failures remain errors.
+func retiredInterception(err error) bool {
+	var protocol *cdproto.Error
+	return errors.As(err, &protocol) && protocol.Code == -32602 && protocol.Message == "Invalid InterceptionId."
+}
+
+func TestRetiredInterceptionDoesNotHideOtherProtocolFailures(t *testing.T) {
+	if !retiredInterception(fmt.Errorf("response: %w", &cdproto.Error{Code: -32602, Message: "Invalid InterceptionId."})) {
+		t.Fatal("cancelled navigation was treated as a bridge failure")
+	}
+	for _, err := range []error{errors.New("Invalid InterceptionId."), &cdproto.Error{Code: -32000, Message: "Invalid InterceptionId."}, &cdproto.Error{Code: -32602, Message: "Invalid response headers"}} {
+		if retiredInterception(err) {
+			t.Fatalf("genuine bridge failure was hidden: %v", err)
+		}
 	}
 }
 
@@ -238,16 +259,7 @@ func TestPhoneWebView(t *testing.T) {
 }
 
 func runPhone(t *testing.T, android bool) {
-	exe := os.Getenv("SIM_CHROME")
-	if exe == "" {
-		for _, p := range []string{"/opt/pw-browsers/chromium-1243/chrome-linux64/chrome", "/usr/bin/google-chrome",
-			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"} {
-			if _, err := os.Stat(p); err == nil {
-				exe = p
-				break
-			}
-		}
-	}
+	exe := phoneBrowser()
 	if exe == "" {
 		t.Skip("no Chromium found; set SIM_CHROME")
 	}
@@ -519,4 +531,31 @@ func runPhone(t *testing.T, android bool) {
 	if others != 0 {
 		t.Errorf("the page tried to reach %d off-origin URLs besides the probe", others)
 	}
+}
+
+// phoneBrowser uses a separate headless profile through chromedp. Never attach
+// to or change a user's running browser profile.
+func phoneBrowser() string {
+	if executable := os.Getenv("SIM_CHROME"); executable != "" {
+		return executable
+	}
+	candidates := []string{
+		"/opt/pw-browsers/chromium-1243/chrome-linux64/chrome", "/usr/bin/google-chrome",
+		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+		filepath.Join(os.Getenv("PROGRAMFILES"), "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(os.Getenv("PROGRAMFILES(X86)"), "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Google", "Chrome", "Application", "chrome.exe"),
+		filepath.Join(os.Getenv("PROGRAMFILES(X86)"), "Microsoft", "Edge", "Application", "msedge.exe"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	for _, name := range []string{"google-chrome", "chromium", "chromium-browser", "chrome", "msedge"} {
+		if path, err := exec.LookPath(name); err == nil {
+			return path
+		}
+	}
+	return ""
 }

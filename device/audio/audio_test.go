@@ -91,3 +91,38 @@ func TestAcceptedAudioContainers(t *testing.T) {
 		}
 	}
 }
+
+func TestAndroidM4AExtendedSizeMediaBox(t *testing.T) {
+	box := func(kind string, body []byte) []byte {
+		b := make([]byte, 8+len(body))
+		binary.BigEndian.PutUint32(b, uint32(len(b)))
+		copy(b[4:], kind)
+		copy(b[8:], body)
+		return b
+	}
+	header := append(box("ftyp", []byte("mp42\x00\x00\x00\x00isommp42")), box("moov", []byte("mp4a"))...)
+	media := make([]byte, 20)
+	binary.BigEndian.PutUint32(media, 1)
+	copy(media[4:], "mdat")
+	binary.BigEndian.PutUint64(media[8:], 20)
+	copy(media[16:], []byte{1, 2, 3, 4})
+	content := append(append([]byte(nil), header...), media...)
+	request := Request{Title: "Android recording"}
+	document := files.Document{Name: "Recording.m4a", MediaType: "audio/mp4", Data: content}
+	if err := request.Accept(document, 1000); err != nil {
+		t.Fatal(err)
+	}
+	for length := 0; length < len(content); length++ {
+		document.Data = content[:length]
+		if request.Accept(document, 1000) == nil {
+			t.Fatalf("accepted truncated extended box at %d", length)
+		}
+	}
+	for _, size := range []uint64{0, 8, 15, 21, ^uint64(0)} {
+		binary.BigEndian.PutUint64(media[8:], size)
+		document.Data = append(append([]byte(nil), header...), media...)
+		if request.Accept(document, 1000) == nil {
+			t.Fatalf("accepted invalid extended size %d", size)
+		}
+	}
+}

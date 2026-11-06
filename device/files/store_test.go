@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/DonaldMurillo/gofastr-native/internal/privatefile"
 )
 
 func TestStoreOpaqueHandlesAndPrivateCollections(t *testing.T) {
@@ -25,7 +27,7 @@ func TestStoreOpaqueHandlesAndPrivateCollections(t *testing.T) {
 		t.Fatalf("invalid metadata: %+v", item)
 	}
 	info, err := os.Stat(filepath.Join(directory, item.Handle+".json"))
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err != nil || privatefile.Check(filepath.Join(directory, item.Handle+".json")) != nil {
 		t.Fatalf("private file permissions: %v %v", info, err)
 	}
 	store, err = NewStore(directory)

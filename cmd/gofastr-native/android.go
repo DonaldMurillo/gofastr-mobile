@@ -3,6 +3,8 @@ package main
 import (
 	"archive/zip"
 	"bufio"
+	"context"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"io"
@@ -43,7 +45,7 @@ func findAndroidSDK(dry bool) (androidSDK, error) {
 	s.root = firstEnv("ANDROID_HOME", "ANDROID_SDK_ROOT")
 	if s.root == "" {
 		if home, err := os.UserHomeDir(); err == nil {
-			for _, p := range []string{filepath.Join(home, "Library", "Android", "sdk"), filepath.Join(home, "Android", "Sdk")} {
+			for _, p := range []string{filepath.Join(os.Getenv("LOCALAPPDATA"), "Android", "Sdk"), filepath.Join(home, "Library", "Android", "sdk"), filepath.Join(home, "Android", "Sdk")} {
 				if isDir(p) {
 					s.root = p
 					break
@@ -63,6 +65,9 @@ func findAndroidSDK(dry bool) (androidSDK, error) {
 	}
 	if api := highestPlatform(filepath.Join(s.root, "platforms")); api > 0 {
 		s.api = api
+		if api < 33 {
+			missing = append(missing, "an SDK platform API 33+ (runtime minimum remains API 24)")
+		}
 		s.androidJar = filepath.Join(s.root, "platforms", "android-"+strconv.Itoa(api), "android.jar")
 	} else {
 		missing = append(missing, "an SDK platform (platforms;android-NN)")
@@ -79,8 +84,8 @@ func findAndroidSDK(dry bool) (androidSDK, error) {
 		missing = append(missing, "the NDK (ndk;<version>)")
 		s.ndk = filepath.Join(s.root, "ndk", "<version>")
 	}
-	s.adb = filepath.Join(s.root, "platform-tools", "adb")
-	s.emulator = filepath.Join(s.root, "emulator", "emulator")
+	s.adb = filepath.Join(s.root, "platform-tools", executableName("adb"))
+	s.emulator = filepath.Join(s.root, "emulator", executableName("emulator"))
 	s.javac = jdkTool("javac")
 	s.keytool = jdkTool("keytool")
 	if s.javac == "" || s.keytool == "" {
@@ -93,7 +98,23 @@ func findAndroidSDK(dry bool) (androidSDK, error) {
 	return s, nil
 }
 
-func (s androidSDK) tool(name string) string { return filepath.Join(s.buildTools, name) }
+func (s androidSDK) tool(name string) string {
+	if runtime.GOOS == "windows" {
+		if name == "d8" || name == "apksigner" {
+			name += ".bat"
+		} else {
+			name += ".exe"
+		}
+	}
+	return filepath.Join(s.buildTools, name)
+}
+
+func executableName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
 
 func buildAndroid(r *runner, a app, out string) (string, error) {
 	sdk, err := findAndroidSDK(r.dryRun)
@@ -101,31 +122,70 @@ func buildAndroid(r *runner, a app, out string) (string, error) {
 		return "", fmt.Errorf("%w (run: gofastr-native doctor --platform android-emu)", err)
 	}
 	a = a.forAndroid(sdk.api)
+	if a.Renderer == "native" {
+		a.Extensions, err = discoverPlatformExtensions(r, a.PkgPath, "android")
+		if err != nil {
+			return "", err
+		}
+	}
 	work := filepath.Join(out, "work")
 	bin := filepath.Join(work, "bin")
 	if err := bootstrapGomobile(r, bin); err != nil {
 		return "", err
 	}
 	r.env = append(r.env, "ANDROID_HOME="+sdk.root, "ANDROID_NDK_HOME="+sdk.ndk)
+	compatibilityDir, err := androidLibcOverlay(r, work)
+	if err != nil {
+		return "", err
+	}
 
 	aar := filepath.Join(work, a.PkgName+".aar")
-	if err := r.run("bind the Go app as an Android library",
-		filepath.Join(bin, "gomobile"), "bind", "-target=android/arm64,android/amd64",
+	binder := *r
+	if compatibilityDir != "" {
+		binder.dir = compatibilityDir
+		binder.env = append(append([]string(nil), r.env...), "GOWORK=off")
+	}
+	if err := binder.run("bind the Go app as an Android library",
+		filepath.Join(bin, executableName("gomobile")), "bind", "-target=android/arm64,android/amd64",
+		"-ldflags=-extldflags=-Wl,-z,max-page-size=16384",
 		"-androidapi", strconv.Itoa(a.MinSDK), "-o", aar, a.PkgPath); err != nil {
 		return "", err
 	}
+	r.step = binder.step
 	unpacked := filepath.Join(work, "aar")
 	if err := r.do("unpack the bindings and native libraries", func() error { return unpackAAR(aar, unpacked) }); err != nil {
 		return "", err
 	}
-	classesJar := filepath.Join(unpacked, "classes.jar")
-
-	src := filepath.Join(work, "android", "src", filepath.FromSlash(strings.ReplaceAll(a.ID, ".", "/")), "MainActivity.java")
-	manifest := filepath.Join(work, "android", "AndroidManifest.xml")
-	if err := r.do("generate MainActivity.java and AndroidManifest.xml", func() error {
-		if err := writeRendered("templates/android/MainActivity.java.tmpl", src, a); err != nil {
+	if err := r.do("verify 16 KiB Android native-library alignment", func() error {
+		libraries, err := listFiles(filepath.Join(unpacked, "jni"), ".so")
+		if err != nil {
 			return err
 		}
+		for _, path := range libraries {
+			library, err := elf.Open(path)
+			if err != nil {
+				return err
+			}
+			for _, segment := range library.Progs {
+				if segment.Type == elf.PT_LOAD && segment.Align < 16384 {
+					library.Close()
+					return fmt.Errorf("%s is not aligned for Android 16 KiB pages; use an NDK supporting -z max-page-size=16384", path)
+				}
+			}
+			library.Close()
+		}
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	classesJar := filepath.Join(unpacked, "classes.jar")
+
+	sources, err := prepareAndroidHost(r, a, filepath.Join(work, "android"))
+	if err != nil {
+		return "", err
+	}
+	manifest := filepath.Join(work, "android", "AndroidManifest.xml")
+	if err := r.do("generate AndroidManifest.xml", func() error {
 		return writeRendered("templates/android/AndroidManifest.xml.tmpl", manifest, a)
 	}); err != nil {
 		return "", err
@@ -134,9 +194,8 @@ func buildAndroid(r *runner, a app, out string) (string, error) {
 	if err := r.do("clear old classes", func() error { return os.RemoveAll(classes) }); err != nil {
 		return "", err
 	}
-	if err := r.run("compile the Java host", sdk.javac, "--release", "11", "-nowarn",
-		"-classpath", sdk.androidJar+string(os.PathListSeparator)+classesJar,
-		"-d", classes, src); err != nil {
+	javaArgs := []string{"--release", "11", "-encoding", "UTF-8", "-nowarn", "-classpath", sdk.androidJar + string(os.PathListSeparator) + classesJar, "-d", classes}
+	if err := r.run("compile the Java host", sdk.javac, append(javaArgs, sources...)...); err != nil {
 		return "", err
 	}
 	classFiles := []string{filepath.Join(classes, "<class files>")}
@@ -197,7 +256,7 @@ func runAndroid(r *runner, a app, apk string, opts runOpts) error {
 	if err != nil {
 		return err
 	}
-	if err := r.run("install the app", sdk.adb, "-s", serial, "install", "-r", apk); err != nil {
+	if err := r.run("install the app", sdk.adb, "-s", serial, "install", "-r", "--no-incremental", apk); err != nil {
 		return err
 	}
 	if err := r.run("launch the app", sdk.adb, "-s", serial, "shell", "am", "start", "-W", "-n", a.ID+"/.MainActivity"); err != nil {
@@ -214,7 +273,7 @@ func runAndroid(r *runner, a app, apk string, opts runOpts) error {
 		}
 	}
 	fmt.Fprintf(r.out, "\nRunning on %s.\n  Logs:     %s -s %s logcat -s gofastr-native GoLog chromium\n", serial, sdk.adb, serial)
-	if a.HostTemplate == "" {
+	if a.HostTemplate == "" && a.Renderer != "native" {
 		fmt.Fprintln(r.out, "  DevTools: chrome://inspect in desktop Chrome")
 	}
 	return nil
@@ -236,7 +295,15 @@ func androidDevice(r *runner, sdk androidSDK, want string) (string, error) {
 			if s == want {
 				return s, nil
 			}
+			if strings.HasPrefix(s, "emulator-") {
+				if name, err := r.quietOutput(sdk.adb, "-s", s, "emu", "avd", "name"); err == nil && strings.Split(strings.TrimSpace(name), "\n")[0] == want {
+					return s, nil
+				}
+			}
 		}
+	}
+	if !r.dryRun && (strings.HasPrefix(want, "emulator-") || strings.Contains(want, ":")) {
+		return "", fmt.Errorf("requested adb device %q is not attached", want)
 	}
 	avd := want
 	if avd == "" {
@@ -248,29 +315,39 @@ func androidDevice(r *runner, sdk androidSDK, want string) (string, error) {
 		if len(names) == 0 {
 			return "", errors.New("no device attached and no AVD to boot: create one in Android Studio's Device Manager or with avdmanager (see gofastr-native doctor)")
 		}
-		avd = names[0]
+		avd = preferredAndroidAVD(names)
 	}
+	port := 5554
+	for strings.Contains(listing, fmt.Sprintf("emulator-%d", port)) {
+		port += 2
+	}
+	serial := fmt.Sprintf("emulator-%d", port)
 	if err := r.do("boot the emulator "+avd+" in the background", func() error {
-		cmd := exec.Command(sdk.emulator, "-avd", avd, "-netdelay", "none", "-netspeed", "full")
+		cmd := exec.Command(sdk.emulator, "-avd", avd, "-port", strconv.Itoa(port), "-netdelay", "none", "-netspeed", "full")
 		cmd.Env = append(os.Environ(), r.env...)
 		// Detached: the emulator outlives this command, like Simulator.app.
 		return cmd.Start()
 	}); err != nil {
 		return "", err
 	}
-	if err := r.run("wait for the emulator to attach", sdk.adb, "wait-for-device"); err != nil {
+	waitContext, cancel := context.WithTimeout(r.ctx, 4*time.Minute)
+	defer cancel()
+	waiter := *r
+	waiter.ctx = waitContext
+	if err := waiter.run("wait for the emulator to attach", sdk.adb, "-s", serial, "wait-for-device"); err != nil {
 		return "", err
 	}
+	r.step = waiter.step
 	if !r.dryRun {
 		deadline := time.Now().Add(4 * time.Minute)
 		for {
 			// adb answers an error while the device is still coming up;
 			// that is "not yet", not a verdict.
-			done, err := r.quietOutput(sdk.adb, "shell", "getprop", "sys.boot_completed")
+			done, err := waiter.quietOutput(sdk.adb, "-s", serial, "shell", "getprop", "sys.boot_completed")
 			if err == nil && strings.TrimSpace(done) == "1" {
 				break
 			}
-			if time.Now().After(deadline) {
+			if time.Now().After(deadline) || waitContext.Err() != nil {
 				return "", errors.New("the emulator did not finish booting within 4 minutes")
 			}
 			time.Sleep(2 * time.Second)
@@ -283,10 +360,33 @@ func androidDevice(r *runner, sdk androidSDK, want string) (string, error) {
 	if r.dryRun {
 		return "emulator-5554", nil
 	}
-	if serials := parseADBDevices(listing); len(serials) > 0 {
-		return serials[0], nil
+	for _, attached := range parseADBDevices(listing) {
+		if attached == serial {
+			return serial, nil
+		}
 	}
 	return "", errors.New("the emulator booted but adb lists no device")
+}
+
+// Prefer a phone over a TV AVD. TV images are often 32-bit and cannot install
+// the ARM64/x86-64 APK; preserve explicit --device choices.
+func preferredAndroidAVD(names []string) string {
+	best := ""
+	score := -100
+	for _, name := range names {
+		candidate := 0
+		lower := strings.ToLower(name)
+		if strings.Contains(lower, "pixel") || strings.Contains(lower, "phone") {
+			candidate += 10
+		}
+		if strings.Contains(lower, "tv") {
+			candidate -= 20
+		}
+		if best == "" || candidate > score {
+			best, score = name, candidate
+		}
+	}
+	return best
 }
 
 // quietOutput runs a polling command without a step header.

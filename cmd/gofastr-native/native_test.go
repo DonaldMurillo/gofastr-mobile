@@ -185,7 +185,7 @@ func TestPrepareIOSHostCopiesLibrarySourcesUnchanged(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != 0o600 {
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 			t.Errorf("source permissions: %s: %v", source, info.Mode())
 		}
 	}
@@ -335,7 +335,6 @@ func TestNativeRendererRejectsUnsupportedConfigurations(t *testing.T) {
 		flags   []string
 		message string
 	}{
-		{[]string{"--platform", "android-emu", "--renderer", "native"}, "Android native rendering is not implemented"},
 		{[]string{"--platform", "ios-sim", "--renderer", "canvas"}, "--renderer must be webview or native"},
 		{[]string{"--platform", "ios-sim", "--renderer", "native", "--host-template", "custom.tmpl"}, "cannot use --host-template"},
 	} {

@@ -195,6 +195,8 @@ func render(path string, a app) ([]byte, error) {
 		src, err = os.ReadFile(a.HostTemplate)
 	} else if a.Renderer == "native" && path == "templates/ios/App.swift.tmpl" {
 		src, err = templates.ReadFile("templates/ios/NativeApp.swift.tmpl")
+	} else if a.Renderer == "native" && path == "templates/android/MainActivity.java.tmpl" {
+		src, err = templates.ReadFile("templates/android/NativeActivity.java.tmpl")
 	} else {
 		src, err = templates.ReadFile(path)
 	}
@@ -279,7 +281,7 @@ func bootstrapGomobile(r *runner, bin string) error {
 		return err
 	}
 	for _, tool := range []string{"gomobile", "gobind"} {
-		if err := r.run("build "+tool+" at the version go.mod pins", "go", "build", "-o", filepath.Join(bin, tool), "golang.org/x/mobile/cmd/"+tool); err != nil {
+		if err := r.run("build "+tool+" at the version go.mod pins", "go", "build", "-o", filepath.Join(bin, executableName(tool)), "golang.org/x/mobile/cmd/"+tool); err != nil {
 			return fmt.Errorf("%w\n    (the module running gofastr-native must require golang.org/x/mobile: go get -tool golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind)", err)
 		}
 	}

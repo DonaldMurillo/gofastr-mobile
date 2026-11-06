@@ -21,7 +21,7 @@ import (
 )
 
 func TestNativeStartupDoesNotDependOnWebPresentation(t *testing.T) {
-	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
+	defer func() { _ = Stop(); owner.SetExtractor(nil) }()
 	output, err := exec.Command("go", "list", "-deps", "github.com/DonaldMurillo/gofastr-native/examples/notes/notesnative").CombinedOutput()
 	if err != nil {
 		t.Fatalf("native dependency boundary: %v\n%s", err, output)
@@ -56,7 +56,7 @@ func TestNativeStartupDoesNotDependOnWebPresentation(t *testing.T) {
 }
 
 func TestNativeRefusesForeignIdentityBeforeOpeningData(t *testing.T) {
-	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
+	defer func() { _ = Stop(); owner.SetExtractor(nil) }()
 	owner.SetExtractor(func(context.Context) (any, bool) { return "auth-owner", true })
 	directory := filepath.Join(t.TempDir(), "not-created")
 	if err := Start(directory); err == nil || !strings.Contains(err.Error(), "authenticator") {
@@ -78,7 +78,7 @@ func TestNativeRefusesForeignIdentityBeforeOpeningData(t *testing.T) {
 }
 
 func TestNativeMigrationFailureCanRestartWithoutReminting(t *testing.T) {
-	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
+	defer func() { _ = Stop(); owner.SetExtractor(nil) }()
 	directory := t.TempDir()
 	data, err := localapp.Open(directory)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestNativeMigrationFailureCanRestartWithoutReminting(t *testing.T) {
 }
 
 func TestStopDrainsCommandsWithoutHoldingLifecycleLock(t *testing.T) {
-	t.Cleanup(func() { _ = Stop(); owner.SetExtractor(nil) })
+	defer func() { _ = Stop(); owner.SetExtractor(nil) }()
 	directory := t.TempDir()
 	if err := Start(directory); err != nil {
 		t.Fatal(err)

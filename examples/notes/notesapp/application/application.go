@@ -3,6 +3,11 @@
 package application
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+
+	"github.com/DonaldMurillo/gofastr-native/internal/privatefile"
 	"github.com/DonaldMurillo/gofastr/core/schema"
 	"github.com/DonaldMurillo/gofastr/framework"
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
@@ -24,6 +29,22 @@ type Application struct {
 // later stop hooks; callers abandoning construction must also call Shutdown.
 // Options configure the selected host without importing a presentation here.
 func Open(dataDir string, options ...framework.AppOption) (*Application, error) {
+	if !filepath.IsAbs(dataDir) {
+		return nil, errors.New("notes: installation directory must be absolute")
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("notes: installation directory must not be a symlink")
+	}
+	if err := privatefile.Harden(dataDir, true); err != nil {
+		return nil, err
+	}
 	data, err := localapp.Open(dataDir)
 	if err != nil {
 		return nil, err

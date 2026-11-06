@@ -23,10 +23,17 @@ type compiledExtension struct {
 }
 
 func discoverExtensions(r *runner, packagePath string) ([]compiledExtension, error) {
+	return discoverPlatformExtensions(r, packagePath, "ios")
+}
+
+func discoverPlatformExtensions(r *runner, packagePath, target string) ([]compiledExtension, error) {
 	if packagePath == "" || strings.HasPrefix(packagePath, "-") {
 		return nil, errors.New("--pkg must name a Go package, not a go list flag")
 	}
-	content, err := r.outputBytes("discover compiled native extensions", nil, "env", "GOOS=ios", "GOARCH=arm64", "CGO_ENABLED=1", "go", "list", "-deps", "-json", packagePath)
+	probe := *r
+	probe.env = append(append([]string(nil), r.env...), "GOOS="+target, "GOARCH=arm64", "CGO_ENABLED=1")
+	content, err := probe.outputBytes("discover compiled native extensions", nil, "go", "list", "-deps", "-json", packagePath)
+	r.step = probe.step
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +88,11 @@ func discoverExtensionManifests(content []byte) ([]compiledExtension, error) {
 			}
 			capabilities[capability] = manifest.Name
 		}
-		for _, source := range append(append([]string(nil), manifest.IOS.Sources...), manifest.WebView.Script) {
+		assets := append(append([]string(nil), manifest.IOS.Sources...), manifest.WebView.Script)
+		if manifest.Android != nil {
+			assets = append(assets, manifest.Android.Sources...)
+		}
+		for _, source := range assets {
 			if _, err := extensionAsset(directory, source, 512*1024); err != nil {
 				return nil, fmt.Errorf("%s: asset %q for %s: %w; bundle a nonempty regular asset (at most 512 KiB) without symlinks", path, source, manifest.Name, err)
 			}

@@ -11,7 +11,7 @@ import (
 	"github.com/DonaldMurillo/gofastr-native/extension/webassets"
 )
 
-//go:embed gofastr-native.extension.json *.swift photos.js
+//go:embed gofastr-native.extension.json *.swift *.java photos.js
 var assets embed.FS
 
 func init() { webassets.Register(Definition()) }

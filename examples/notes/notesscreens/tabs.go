@@ -47,7 +47,7 @@ func settingsRoute() nativeui.Route {
 
 func aboutRoute(path, closeKind string) nativeui.Route {
 	return nativeui.Route{Path: path, Screen: func(context.Context, nativeui.Request) (nativeui.Screen, error) {
-		return nativeui.Screen{Title: "About Notes", Text: "Go-authored screens. Your choice of renderer.\n\nThis screen, the list, the editor, and their actions are defined once in Go using gofastr-native. The library renders them with UIKit or mobile WebView components; the application owns no platform screen source.\n\nNotes use the same owner-scoped Go service in either renderer. Unsaved drafts stay on this device and are separate from saved notes. Saved reminder fields do not confirm scheduling: choose Schedule explicitly, then check the device outcome. Android native services are deferred.",
+		return nativeui.Screen{Title: "About Notes", Text: "Your notes stay on this device.\n\nNotes, attachments, and unsaved drafts belong to this installation. A draft is separate from a saved note.\n\nReminder fields do not schedule a notification. Choose Schedule reminder on a saved note, then check the device outcome.\n\nThe same Go screens and actions run through native iOS, native Android, or the mobile WebView renderer.",
 			Actions: []nativeui.Action{{ID: "close", Label: "Done", Primary: true}}}, nil
 	}, Actions: map[string]nativeui.Handle{"close": navigate(closeKind, "")}}
 }

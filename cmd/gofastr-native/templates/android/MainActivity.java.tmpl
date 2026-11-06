@@ -22,6 +22,8 @@ import android.webkit.WebMessagePort;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebChromeClient;
+import android.webkit.ValueCallback;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -46,6 +48,7 @@ public final class MainActivity extends Activity {
     private static final String ORIGIN = "{{.Origin}}";
 
     private WebView web;
+    private ValueCallback<Uri[]> fileChoice;
     // Bridged requests block in Go; never on the UI thread.
     private final ExecutorService bridgeThreads = Executors.newCachedThreadPool();
 
@@ -59,6 +62,15 @@ public final class MainActivity extends Activity {
         // chrome://inspect on the desktop attaches DevTools.
         WebView.setWebContentsDebuggingEnabled(true);
         web.setWebViewClient(new GoClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (fileChoice != null) fileChoice.onReceiveValue(null);
+                fileChoice = callback;
+                try { startActivityForResult(params.createIntent(), 501); }
+                catch (android.content.ActivityNotFoundException e) { fileChoice = null; callback.onReceiveValue(null); }
+                return true;
+            }
+        });
         setContentView(web);
         final String dataDir = getFilesDir().getAbsolutePath() + "/app";
         // Migrations run in start: keep them off the main thread.
@@ -74,6 +86,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (fileChoice != null) { fileChoice.onReceiveValue(null); fileChoice = null; }
         bridgeThreads.shutdownNow();
         try {
             {{.JavaClass}}.stop();
@@ -81,6 +94,19 @@ public final class MainActivity extends Activity {
             Log.e(TAG, "stop failed", e);
         }
         super.onDestroy();
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 501 && fileChoice != null) {
+            ValueCallback<Uri[]> callback = fileChoice; fileChoice = null;
+            callback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+        }
+    }
+
+    private static boolean trusted(Uri url) {
+        return "https".equals(url.getScheme()) && HOST.equals(url.getHost()) &&
+            (url.getPort() == -1 || url.getPort() == 443) && url.getUserInfo() == null;
     }
 
     @Override
@@ -99,7 +125,7 @@ public final class MainActivity extends Activity {
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
             Uri url = request.getUrl();
-            if (!HOST.equals(url.getHost())) {
+            if (!trusted(url)) {
                 return new WebResourceResponse("text/plain", "utf-8", 403, "Forbidden",
                         new HashMap<String, String>(), new ByteArrayInputStream(new byte[0]));
             }
@@ -135,7 +161,7 @@ public final class MainActivity extends Activity {
         // frame of every origin sees).
         @Override
         public void onPageFinished(WebView view, String url) {
-            if (!HOST.equals(Uri.parse(url).getHost())) {
+            if (!trusted(Uri.parse(url))) {
                 return;
             }
             WebMessagePort[] ports = view.createWebMessageChannel();
@@ -155,11 +181,15 @@ public final class MainActivity extends Activity {
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            if (HOST.equals(request.getUrl().getHost())) {
+            if (trusted(request.getUrl())) {
                 return false;
             }
             // External links leave the app.
-            startActivity(new Intent(Intent.ACTION_VIEW, request.getUrl()));
+            String scheme = request.getUrl().getScheme();
+            if ("https".equals(scheme) || "http".equals(scheme)) {
+                try { startActivity(new Intent(Intent.ACTION_VIEW, request.getUrl())); }
+                catch (android.content.ActivityNotFoundException e) { Log.w(TAG, "no browser for external link", e); }
+            }
             return true;
         }
     }

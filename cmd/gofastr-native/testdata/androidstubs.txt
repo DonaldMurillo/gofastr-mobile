@@ -21,6 +21,9 @@ public abstract class Uri {
     public static Uri parse(String uriString) { return null; }
     public abstract String getHost();
     public abstract String getPath();
+    public abstract String getScheme();
+    public abstract int getPort();
+    public abstract String getUserInfo();
 }
 --- android/os/Bundle.java
 package android.os;
@@ -51,6 +54,8 @@ public class Activity extends android.content.Context {
     protected void onCreate(android.os.Bundle savedInstanceState) {}
     protected void onDestroy() {}
     public void onBackPressed() {}
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {}
+    public void startActivityForResult(android.content.Intent intent, int requestCode) {}
     public void setContentView(android.view.View view) {}
     public final void runOnUiThread(Runnable action) {}
 }
@@ -67,6 +72,7 @@ public class WebView extends android.view.View {
     public WebSettings getSettings() { return null; }
     public static void setWebContentsDebuggingEnabled(boolean enabled) {}
     public void setWebViewClient(WebViewClient client) {}
+    public void setWebChromeClient(WebChromeClient client) {}
     public void loadUrl(String url) {}
     public boolean canGoBack() { return false; }
     public void goBack() {}
@@ -136,4 +142,19 @@ public class JSONObject {
     public JSONArray optJSONArray(String name) { return null; }
     public JSONObject put(String name, boolean value) throws JSONException { return this; }
     public JSONObject put(String name, Object value) throws JSONException { return this; }
+}
+--- android/content/ActivityNotFoundException.java
+package android.content;
+public class ActivityNotFoundException extends RuntimeException {}
+--- android/webkit/ValueCallback.java
+package android.webkit;
+public interface ValueCallback<T> { void onReceiveValue(T value); }
+--- android/webkit/WebChromeClient.java
+package android.webkit;
+public class WebChromeClient {
+    public boolean onShowFileChooser(WebView view, ValueCallback<android.net.Uri[]> callback, FileChooserParams params) { return false; }
+    public static abstract class FileChooserParams {
+        public abstract android.content.Intent createIntent();
+        public static android.net.Uri[] parseResult(int resultCode, android.content.Intent data) { return null; }
+    }
 }

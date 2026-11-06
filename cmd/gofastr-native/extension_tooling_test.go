@@ -159,6 +159,16 @@ func TestExtensionCheckCommandBoundary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
+	if runtime.GOOS == "windows" {
+		source := filepath.Join(t.TempDir(), "fakego.go")
+		program := "package main\nimport(\"os\";\"strings\")\nfunc main(){if strings.Join(os.Args[1:],\" \")!=\"list -deps -json ./consumer\"{os.Exit(27)};b,e:=os.ReadFile(os.Getenv(\"EXTENSION_GRAPH\"));if e!=nil{os.Exit(28)};os.Stdout.Write(b)}"
+		if err := os.WriteFile(source, []byte(program), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command("go", "build", "-o", filepath.Join(bin, "go.exe"), source).CombinedOutput(); err != nil {
+			t.Fatalf("fake go: %v %s", err, output)
+		}
+	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("EXTENSION_GRAPH", graphPath)
 	var stdout, stderr bytes.Buffer

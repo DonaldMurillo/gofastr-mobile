@@ -125,9 +125,10 @@ type undoItem struct {
 }
 
 type undoEntry struct {
-	owner   string
-	expires time.Time
-	items   []undoItem
+	sequence uint64
+	owner    string
+	expires  time.Time
+	items    []undoItem
 }
 
 var ErrUndoUnavailable = errors.New("undo is expired, unavailable, or the notes have changed")
@@ -146,7 +147,7 @@ func (service *Service) LatestUndo(ctx context.Context) string {
 			delete(service.undo, token)
 			continue
 		}
-		if entry.owner == owner && (latest == "" || entry.expires.After(service.undo[latest].expires)) {
+		if entry.owner == owner && (latest == "" || entry.sequence > service.undo[latest].sequence) {
 			latest = token
 		}
 	}
@@ -236,13 +237,15 @@ func (service *Service) remember(entry undoEntry) Mutation {
 	if len(service.undo) >= MaximumUndo {
 		var oldest string
 		for token, retained := range service.undo {
-			if oldest == "" || retained.expires.Before(service.undo[oldest].expires) {
+			if oldest == "" || retained.sequence < service.undo[oldest].sequence {
 				oldest = token
 			}
 		}
 		delete(service.undo, oldest)
 	}
 	result.Undo = rand.Text()
+	service.undoSequence++
+	entry.sequence = service.undoSequence
 	service.undo[result.Undo] = entry
 	return result
 }

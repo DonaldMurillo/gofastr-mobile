@@ -45,11 +45,11 @@ Flags (build, run):
   --version     app version (default 0.1.0)
   --out         output directory (default dist/mobile/<platform>)
   --host-template  caller-owned Swift/Java host template (default: WebView host)
-  --renderer    webview (default) or native (Go screen definitions; iOS only)
-  --camera-usage  iOS camera purpose text (default: user-initiated photo capture;
+  --renderer    webview (default) or native (Go screen definitions; iOS/Android)
+  --camera-usage  camera purpose text (default: user-initiated photo capture;
                 empty disables native camera access)
-  --microphone-usage  optional iOS microphone purpose text; empty disables recording
-  --url-scheme  optional application-specific deep-link scheme (native iOS only)
+  --microphone-usage  optional microphone purpose text; empty disables recording
+  --url-scheme  optional application-specific deep-link scheme (native renderer)
   --dry-run     print every step without running it
 
 Flags (run only):
@@ -141,10 +141,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "--renderer must be webview or native")
 		return 2
 	}
-	if *renderer == "native" && *platform != "ios-sim" {
-		fmt.Fprintln(stderr, "--renderer native: Android native rendering is not implemented; use --renderer webview or --platform ios-sim")
-		return 2
-	}
 	if *renderer == "native" && *hostTemplate != "" {
 		fmt.Fprintln(stderr, "--renderer native cannot use --host-template")
 		return 2
@@ -153,8 +149,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	if *urlScheme != "" && (*renderer != "native" || *platform != "ios-sim") {
-		fmt.Fprintln(stderr, "--url-scheme currently requires --renderer native --platform ios-sim")
+	if *urlScheme != "" && *renderer != "native" {
+		fmt.Fprintln(stderr, "--url-scheme requires --renderer native")
 		return 2
 	}
 	if *wait < 0 {
@@ -169,8 +165,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	if strings.TrimSpace(*microphoneUsage) != "" && *platform != "ios-sim" {
-		fmt.Fprintln(stderr, "--microphone-usage currently requires --platform ios-sim")
+	if strings.TrimSpace(*microphoneUsage) != "" && *platform == "android-emu" && *renderer != "native" {
+		fmt.Fprintln(stderr, "--microphone-usage on Android requires --renderer native")
 		return 2
 	}
 	if *hostTemplate != "" {

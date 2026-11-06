@@ -115,11 +115,19 @@ func validADTS(data []byte) bool {
 func validM4A(data []byte) bool {
 	brand, codec, payload := false, false, false
 	for len(data) >= 8 {
-		length := int(binary.BigEndian.Uint32(data[:4]))
-		if length < 8 || length > len(data) {
+		length, header := uint64(binary.BigEndian.Uint32(data[:4])), 8
+		if length == 1 {
+			if len(data) < 16 {
+				return false
+			}
+			length, header = binary.BigEndian.Uint64(data[8:16]), 16
+		} else if length == 0 {
+			length = uint64(len(data))
+		}
+		if length < uint64(header) || length > uint64(len(data)) {
 			return false
 		}
-		kind, body := string(data[4:8]), data[8:length]
+		kind, body := string(data[4:8]), data[header:int(length)]
 		switch kind {
 		case "ftyp":
 			if len(body) < 8 || len(body)%4 != 0 {

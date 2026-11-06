@@ -21,7 +21,7 @@ const Name = "gofastr.media/v1"
 // preview. It is a snapshot, not editor state or an arbitrary layout tree.
 type Content = nativeui.Media
 
-//go:embed gofastr-native.extension.json GofastrMedia.swift media.js
+//go:embed gofastr-native.extension.json GofastrMedia.swift *.java media.js
 var assets embed.FS
 
 func init() { webassets.Register(Definition()) }

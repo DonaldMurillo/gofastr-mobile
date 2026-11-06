@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -22,6 +24,7 @@ type runner struct {
 	// (PATH with the pinned gomobile/gobind first, the Android SDK vars).
 	env  []string
 	step int
+	dir  string
 }
 
 func (r *runner) header(desc string) {
@@ -30,7 +33,20 @@ func (r *runner) header(desc string) {
 }
 
 func (r *runner) command(name string, args ...string) *exec.Cmd {
+	// Call the SDK's Java entry points directly on Windows. This also avoids
+	// cmd.exe reparsing paths and arguments containing spaces or metacharacters.
+	if runtime.GOOS == "windows" {
+		switch strings.ToLower(filepath.Base(name)) {
+		case "d8.bat":
+			args = append([]string{"-cp", filepath.Join(filepath.Dir(name), "lib", "d8.jar"), "com.android.tools.r8.D8"}, args...)
+			name = jdkTool("java")
+		case "apksigner.bat":
+			args = append([]string{"-jar", filepath.Join(filepath.Dir(name), "lib", "apksigner.jar")}, args...)
+			name = jdkTool("java")
+		}
+	}
 	cmd := exec.CommandContext(r.ctx, name, args...)
+	cmd.Dir = r.dir
 	cmd.Env = append(os.Environ(), r.env...)
 	// A child that keeps its pipes open after exit (a simulator helper,
 	// an emulator it forked) must not wedge Wait.

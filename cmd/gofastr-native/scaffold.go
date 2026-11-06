@@ -71,7 +71,7 @@ func scaffoldFiles(name, kind string) (map[string][]byte, error) {
 	digest := sha256.Sum256([]byte(name))
 	factory := fmt.Sprintf("GofastrAdapter%x", digest[:8])
 	manifest := extension.Manifest{Name: name, Kind: extension.Kind(kind), Capabilities: []string{name},
-		IOS: extension.IOS{Factory: factory, Sources: []string{"Adapter.swift"}}, WebView: extension.WebView{Script: "adapter.js"}}
+		IOS: extension.IOS{Factory: factory, Sources: []string{"Adapter.swift"}}, Android: &extension.Android{Factory: factory, Sources: []string{factory + ".java"}}, WebView: extension.WebView{Script: "adapter.js"}}
 	if err := manifest.Validate(); err != nil {
 		return nil, fmt.Errorf("--name/--kind: %w (use a lowercase versioned name such as example.documents/v1)", err)
 	}
@@ -83,6 +83,7 @@ func scaffoldFiles(name, kind string) (map[string][]byte, error) {
 	data := struct{ Name, Factory string }{strconv.Quote(name), factory}
 	for _, entry := range []struct{ source, target string }{
 		{"file.go.tmpl", "adapter.go"}, {"file.swift.tmpl", "Adapter.swift"}, {"file.js.tmpl", "adapter.js"}, {"file_test.go.tmpl", "adapter_test.go"}, {"file-readme.tmpl", "README.md"},
+		{"file.java.tmpl", factory + ".java"},
 	} {
 		source := entry.source
 		if kind == "component" {

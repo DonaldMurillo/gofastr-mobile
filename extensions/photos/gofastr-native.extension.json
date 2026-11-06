@@ -1,1 +1,1 @@
-{"name":"gofastr.photos/v1","capabilities":["photos/v1","camera/v1"],"ios":{"factory":"GofastrPhotoExtension","sources":["GofastrPhotos.swift","GofastrPhotoController.swift"]},"webview":{"script":"photos.js"}}
+{"name":"gofastr.photos/v1","capabilities":["photos/v1","camera/v1"],"ios":{"factory":"GofastrPhotoExtension","sources":["GofastrPhotos.swift","GofastrPhotoController.swift"]},"android":{"factory":"GofastrPhotoExtension","sources":["GofastrPhotoExtension.java"]},"webview":{"script":"photos.js"}}

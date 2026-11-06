@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/DonaldMurillo/gofastr-native/internal/privatefile"
 )
 
 const (
@@ -63,7 +65,7 @@ func NewFileDraftStore(root string) (*FileDraftStore, error) {
 	store := &FileDraftStore{root: root, mu: lock.(*sync.Mutex)}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := os.Chmod(root, 0o700); err != nil {
+	if err := privatefile.Harden(root, true); err != nil {
 		return nil, err
 	}
 	return store, nil
@@ -116,7 +118,7 @@ func (store *FileDraftStore) Put(ctx context.Context, key string, snapshot Snaps
 	}
 	defer os.Remove(temporary.Name())
 	defer temporary.Close()
-	if err := temporary.Chmod(0o600); err != nil {
+	if err := privatefile.Harden(temporary.Name(), false); err != nil {
 		return err
 	}
 	if _, err := temporary.Write(encoded); err != nil {
@@ -131,7 +133,7 @@ func (store *FileDraftStore) Put(ctx context.Context, key string, snapshot Snaps
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.Rename(temporary.Name(), path); err != nil {
+	if err := privatefile.Replace(temporary.Name(), path); err != nil {
 		return err
 	}
 	return store.syncDirectory()
@@ -169,12 +171,7 @@ func (store *FileDraftStore) path(key string) (string, error) {
 }
 
 func (store *FileDraftStore) syncDirectory() error {
-	directory, err := os.Open(store.root)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
+	return privatefile.SyncDirectory(store.root)
 }
 
 func readDraftFile(path string) (Snapshot, bool, error) {
@@ -185,7 +182,7 @@ func readDraftFile(path string) (Snapshot, bool, error) {
 	if err != nil {
 		return Snapshot{}, false, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+	if !info.Mode().IsRegular() || privatefile.Check(path) != nil {
 		return Snapshot{}, false, errors.New("behavior: draft must be an owner-only regular file")
 	}
 	if info.Size() > MaxDraftBytes {

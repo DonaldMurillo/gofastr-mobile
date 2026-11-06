@@ -127,7 +127,7 @@ func TestPhotosAcquisitionContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(source)
+		return strings.ReplaceAll(string(source), "\r\n", "\n")
 	}
 	controller := read("GofastrPhotoController.swift")
 	for _, required := range []string{

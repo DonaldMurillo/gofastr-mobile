@@ -56,11 +56,12 @@ func (err *ValidationError) Error() string { return err.Message }
 
 // Service holds application behavior, not navigation or screen state.
 type Service struct {
-	repository Repository
-	mu         sync.Mutex
-	undoMu     sync.Mutex
-	undo       map[string]undoEntry
-	changes    changeHub
+	repository   Repository
+	mu           sync.Mutex
+	undoMu       sync.Mutex
+	undo         map[string]undoEntry
+	undoSequence uint64
+	changes      changeHub
 }
 
 // New connects Notes behavior to a repository.

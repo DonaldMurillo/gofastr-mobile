@@ -11,6 +11,11 @@
          WebView loads have been reported to fail without it even when
          every request is intercepted; VERIFY ON DEVICE whether it can go. -->
     <uses-permission android:name="android.permission.INTERNET" />
+{{if eq .Renderer "native"}}
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+{{if .MicrophoneUsage}}    <uses-permission android:name="android.permission.RECORD_AUDIO" />{{end}}
+{{end}}
 
     <application
         android:label="{{xml .Name}}"
@@ -19,11 +24,32 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
+            android:enableOnBackInvokedCallback="{{if eq .Renderer "native"}}true{{else}}false{{end}}"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+{{if .URLScheme}}
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="{{xml .URLScheme}}" />
+            </intent-filter>
+{{end}}
         </activity>
+{{if eq .Renderer "native"}}
+        <provider android:name="dev.gofastr.nativeui.TransferProvider"
+            android:authorities="{{xml .ID}}.transfers" android:exported="false" android:grantUriPermissions="true" />
+        <receiver android:name="dev.gofastr.nativeui.ReminderReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+{{end}}
     </application>
 </manifest>

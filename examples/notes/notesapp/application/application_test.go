@@ -16,6 +16,7 @@ import (
 
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp/application"
+	"github.com/DonaldMurillo/gofastr-native/internal/privatefile"
 	"github.com/DonaldMurillo/gofastr-native/mobilehost"
 )
 
@@ -78,12 +79,12 @@ func TestFirstLaunchAndRestartKeepOneInstallation(t *testing.T) {
 	}
 	for _, filename := range []string{localapp.DBFile, localapp.SecretFile, localapp.IdentityFile} {
 		info, err := os.Stat(filepath.Join(directory, filename))
-		if err != nil || info.Mode().Perm() != 0o600 {
+		if err != nil || privatefile.Check(filepath.Join(directory, filename)) != nil {
 			t.Fatalf("private installation file %s: %v, %v", filename, info, err)
 		}
 	}
 	info, err := os.Stat(directory)
-	if err != nil || info.Mode().Perm() != 0o700 {
+	if err != nil || privatefile.Check(directory) != nil {
 		t.Fatalf("first-launch directory: %v, %v", info, err)
 	}
 	stop(t, host)

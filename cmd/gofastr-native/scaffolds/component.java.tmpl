@@ -1,0 +1,22 @@
+package dev.gofastr.nativeui;
+
+import android.view.View;
+import android.widget.TextView;
+import org.json.JSONObject;
+import java.util.Collections;
+import java.util.Map;
+import java.util.function.Consumer;
+
+public final class {{.Factory}} implements Extensions.ComponentFactory {
+    public Map<String,String> capabilities(GofastrActivity host) { return Collections.singletonMap({{.Name}}, "available"); }
+    public Extensions.Component mount(GofastrActivity host, JSONObject payload, Consumer<String> emit) throws Exception {
+        TextView text = host.text(payload.getString("text"), 18);
+        text.setTextIsSelectable(true);
+        return new Extensions.Component() {
+            public View view() { return text; }
+            public void update(JSONObject value, Consumer<String> next) throws Exception { text.setText(value.getString("text")); }
+            public void suspend() {}
+            public void dispose() { text.setText(""); }
+        };
+    }
+}

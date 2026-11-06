@@ -69,7 +69,7 @@ func negotiate(hello Hello, allowed func(Capability) bool) (Contract, error) {
 	if hello.Minimum < 1 || hello.Maximum < hello.Minimum || hello.Minimum > ProtocolVersion || hello.Maximum < ProtocolVersion {
 		return Contract{}, errors.New("nativeui: incompatible mobile protocol")
 	}
-	if hello.Renderer != "uikit" && hello.Renderer != "webview" {
+	if hello.Renderer != "uikit" && hello.Renderer != "android" && hello.Renderer != "webview" {
 		return Contract{}, errors.New("nativeui: unknown renderer")
 	}
 	if len(hello.Capabilities) > 32 {
