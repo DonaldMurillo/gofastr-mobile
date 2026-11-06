@@ -18,7 +18,7 @@ func TestComponentsWireRoutesAndState(t *testing.T) {
 	}
 	directory := t.TempDir()
 	arguments := []string{"--sdk", "macosx", "swiftc", "-O", "-parse-as-library", "-module-cache-path", filepath.Join(directory, "module-cache")}
-	for _, name := range []string{"GofastrComponents.swift", "GofastrComponentExtensions.swift", "GofastrActions.swift", "GofastrFiles.swift", "GofastrPresentation.swift", "GofastrImages.swift", "GofastrAttachments.swift", "GofastrServices.swift"} {
+	for _, name := range []string{"GofastrComponents.swift", "GofastrComponentExtensions.swift", "GofastrActions.swift", "GofastrFiles.swift", "GofastrPresentation.swift", "GofastrImages.swift", "GofastrAttachments.swift", "GofastrServices.swift", "GofastrIncomingShares.swift", "GofastrSecureStorage.swift", "GofastrWidgets.swift"} {
 		source, err := Sources.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
@@ -229,10 +229,12 @@ enum ComponentChecks {
         for (url, expected) in [
             ("notesapp://notes/new?tag=work", "/notes/new?tag=work"),
             ("notesapp://files", "/files"),
+            ("notesapp:/notes?tag=work", "/notes?tag=work"),
+            ("notesapp:/", "/"),
             ("/notes?term=hello%20world", "/notes?term=hello%20world"),
             ("/", "/")
         ] { precondition(MobileLocalRoute.normalize(URL(string: url)!) == expected, url) }
-        for url in ["https://notes/new", "http://notes", "file:///notes", "mailto:a@example.com", "notesapp:/notes", "notesapp://user@notes/new", "notesapp://notes:22/new", "notesapp://notes/new#effect", "//external/notes", "notes", "notesapp://notes/../files", "notesapp://notes/%2e%2e/files", "notesapp://notes/%2Ffiles", "/notes?value=%0a"] {
+        for url in ["https://notes/new", "http://notes", "file:///notes", "mailto:a@example.com", "notesapp:notes", "notesapp:/%2fexternal", "notesapp://user@notes/new", "notesapp://notes:22/new", "notesapp://notes/new#effect", "//external/notes", "notes", "notesapp://notes/../files", "notesapp://notes/%2e%2e/files", "notesapp://notes/%2Ffiles", "/notes?value=%0a"] {
             precondition(MobileLocalRoute.normalize(URL(string: url)!) == nil, url)
         }
         for route in ["/notes/%", "/notes/%xz", "/notes//new", "/notes/./new", "/notes/../new", "/notes/\\new", "/notes\n", "/notes/%3fnew", String(repeating: "/", count: 2050)] {

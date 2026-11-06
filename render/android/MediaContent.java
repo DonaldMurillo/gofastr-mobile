@@ -25,7 +25,7 @@ public final class MediaContent implements Extensions.Component {
         JSONArray images=JSON.array(payload,"images"),files=JSON.array(payload,"attachments");
         for(int i=0;i<images.length();i++) {
             JSONObject image=images.getJSONObject(i);String key="image."+image.optString("id"),event="image."+i;retained.add(key);Item item=items.get(key);
-            if(item==null){item=new Item();item.box=host.column();items.put(key,item);root.addView(item.box);}
+            if(item==null){item=new Item();item.box=box();items.put(key,item);root.addView(item.box);}
             String data=image.optString("data");
             if(!data.equals(item.data)) {
                 item.box.removeAllViews();if(item.bitmap!=null)item.bitmap.recycle();byte[] bytes=Base64.decode(data,Base64.DEFAULT);if(bytes.length>128<<10)throw new IOException("Preview too large");
@@ -38,12 +38,12 @@ public final class MediaContent implements Extensions.Component {
         }
         for(int i=0;i<files.length();i++) {
             JSONObject file=files.getJSONObject(i);String key="file."+file.optString("id"),event="file."+i;retained.add(key);Item item=items.get(key);
-            if(item==null){item=new Item();item.box=host.column();items.put(key,item);root.addView(item.box);}
+            if(item==null){item=new Item();item.box=box();items.put(key,item);root.addView(item.box);}
             JSONObject audio=file.optJSONObject("audio");String audioData=audio==null?"":audio.optJSONObject("file").optString("data");
             if(!file.toString().equals(item.metadata)) {
                 boolean preserve=audioData.equals(item.data);if(!preserve)item.releaseAudio();
-                item.box.removeAllViews();String label=file.optString("name")+"\n"+file.optString("detail");
-                item.box.addView(host.button(label,"native.file."+file.optString("id"),v->emit.accept(event)));
+                item.box.removeAllViews();
+                LinearLayout card=fileCard(file);GofastrActivity.identify(card,"native.file."+file.optString("id"));card.setOnClickListener(v->emit.accept(event));item.box.addView(card);
                 if(audio!=null) {
                     Item bound=item;
                     Button play=host.button("Play","native.audio.play."+file.optString("id"),v->bound.play(audio));item.play=play;item.box.addView(play);
@@ -61,17 +61,28 @@ public final class MediaContent implements Extensions.Component {
         }
         JSONObject preview=payload.optJSONObject("preview");
         if(preview!=null) {
-            retained.add("preview");Item item=items.get("preview");if(item==null){item=new Item();item.box=host.column();items.put("preview",item);root.addView(item.box);}
+            retained.add("preview");Item item=items.get("preview");if(item==null){item=new Item();item.box=box();items.put("preview",item);root.addView(item.box);}
             if(!preview.toString().equals(item.metadata)) {
-                item.box.removeAllViews();JSONObject file=preview.getJSONObject("file");TextView name=host.text(file.optString("name"),22);item.box.addView(name);item.box.addView(host.text(file.optString("detail"),14));
-                if(!preview.optString("caption").isEmpty())item.box.addView(host.text(preview.optString("caption"),16));
-                if(!preview.optString("previewTitle").isEmpty())item.box.addView(host.text(preview.optString("previewTitle"),18));
-                if(!preview.optString("text").isEmpty()){TextView text=host.text(preview.optString("text"),17);text.setTextIsSelectable(true);GofastrActivity.identify(text,"native.file.preview.text");item.box.addView(text);}
+                item.box.removeAllViews();JSONObject file=preview.getJSONObject("file");item.box.addView(fileCard(file));
+                if(!preview.optString("caption").isEmpty()){TextView caption=host.text(preview.optString("caption"),14);host.appearance.apply(caption,Appearance.Tone.SECONDARY);caption.setPadding(host.dp(16),host.dp(8),host.dp(16),host.dp(16));item.box.addView(caption);}
+                if(!preview.optString("previewTitle").isEmpty()){TextView heading=host.sectionLabel(preview.optString("previewTitle"));heading.setPadding(host.dp(16),host.dp(16),host.dp(16),host.dp(8));item.box.addView(heading);}
+                if(!preview.optString("text").isEmpty()){TextView text=host.text(preview.optString("text"),17);text.setPadding(host.dp(16),host.dp(8),host.dp(16),host.dp(20));text.setLineSpacing(host.dp(5),1);text.setTextIsSelectable(true);GofastrActivity.identify(text,"native.file.preview.text");item.box.addView(text);}
                 item.metadata=preview.toString();
             }
             order(item.box,retained.size()-1);
         }
         Iterator<Map.Entry<String,Item>> iterator=items.entrySet().iterator();while(iterator.hasNext()){Map.Entry<String,Item> entry=iterator.next();if(!retained.contains(entry.getKey())){entry.getValue().dispose();root.removeView(entry.getValue().box);iterator.remove();}}
+    }
+    private LinearLayout box() {
+        LinearLayout box=host.column();host.appearance.apply(box,Appearance.Tone.SURFACE);box.setClipToOutline(true);
+        LinearLayout.LayoutParams layout=new LinearLayout.LayoutParams(-1,-2);layout.topMargin=host.dp(12);box.setLayoutParams(layout);return box;
+    }
+    private LinearLayout fileCard(JSONObject file) {
+        LinearLayout card=host.row();card.setPadding(host.dp(16),host.dp(16),host.dp(16),host.dp(16));card.setMinimumHeight(host.dp(80));
+        TextView icon=host.text("",18);icon.setCompoundDrawables(host.appearance.icon(file.optString("icon"),host.accent(),28),null,null,null);icon.setPadding(0,0,host.dp(16),0);icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);card.addView(icon);
+        LinearLayout labels=host.column();TextView name=host.text(file.optString("name"),17);name.setTypeface(null,android.graphics.Typeface.BOLD);name.setPadding(0,0,0,host.dp(5));labels.addView(name);
+        TextView detail=host.text(file.optString("detail"),13);host.appearance.apply(detail,Appearance.Tone.SECONDARY);detail.setPadding(0,0,0,0);labels.addView(detail);card.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
+        return card;
     }
     private void order(View view,int index){if(root.indexOfChild(view)!=index){root.removeView(view);root.addView(view,index);}}
     @Override public void suspend(){for(Item item:items.values())item.releaseAudio();}

@@ -6,17 +6,23 @@ struct MobileServiceRequest: Codable {
     let share: MobileShareRequest?
     let clipboard: MobileClipboardRequest?
     let audio: MobileAudioRequest?
+    let incomingShare: MobileIncomingShareRequest?
+    let secureStorage: MobileSecureStorageRequest?
+    let widget: MobileWidgetRequest?
     let commit: Bool?
 
     func validate() throws {
         guard !id.isEmpty, id.utf8.count <= 256, !id.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
-              [notification != nil, share != nil, clipboard != nil, audio != nil].filter({ $0 }).count == 1 else {
+              [notification != nil, share != nil, clipboard != nil, audio != nil, incomingShare != nil, secureStorage != nil, widget != nil].filter({ $0 }).count == 1 else {
             throw MobileServiceFailure.invalid
         }
         try notification?.validate()
         try share?.validate()
         if let clipboard, clipboard.text.utf8.count > MobileServiceBounds.maximumText || clipboard.text.contains("\0") { throw MobileServiceFailure.tooLarge }
         try audio?.validate()
+        try incomingShare?.validate()
+        try secureStorage?.validate()
+        try widget?.validate()
     }
 }
 
@@ -291,6 +297,9 @@ struct MobileServiceResult: Codable {
     var identifier: String?
     var file: MobileFileExport?
     var durationMillis: Int?
+    var incomingShare: MobileIncomingShareItem?
+    var secureStorage: MobileSecureStorageResult?
+    var widget: MobileWidgetState?
 
     var wire: [String: Any] {
         var value: [String: Any] = ["status": status]
@@ -300,6 +309,11 @@ struct MobileServiceResult: Codable {
         if status == "completed", let file, let durationMillis {
             value["file"] = ["name": file.name, "mediaType": file.mediaType, "data": file.data]
             value["durationMillis"] = durationMillis
+        }
+        if status == "completed" {
+            if let incomingShare { value["incomingShare"] = incomingShare.wire }
+            if let secureStorage { value["secureStorage"] = secureStorage.wire }
+            if let widget, let data = try? JSONEncoder().encode(widget), let encoded = try? JSONSerialization.jsonObject(with: data) { value["widget"] = encoded }
         }
         return value
     }

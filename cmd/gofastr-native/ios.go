@@ -99,7 +99,20 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 	}); err != nil {
 		return "", err
 	}
-	if err := r.run("sign the bundle ad hoc", "codesign", "--force", "--sign", "-", "--timestamp=none", appDir); err != nil {
+	if err := buildIOSFeatureExtensions(r, a, work, appDir, sdk, target); err != nil {
+		return "", err
+	}
+	signArgs := []string{"--force", "--sign", "-", "--timestamp=none"}
+	if a.AppGroup != "" || a.SecureStorage {
+		entitlements := filepath.Join(work, "ios", "Host.entitlements")
+		if err := r.do("generate simulator app-group and private Keychain entitlements", func() error {
+			return writeRendered("templates/ios/DeviceFeatures.entitlements.tmpl", entitlements, a)
+		}); err != nil {
+			return "", err
+		}
+		signArgs = append(signArgs, "--entitlements", entitlements)
+	}
+	if err := r.run("sign the bundle ad hoc", "codesign", append(signArgs, appDir)...); err != nil {
 		return "", err
 	}
 	return appDir, nil

@@ -14,6 +14,7 @@ import (
 
 	"github.com/DonaldMurillo/gofastr-native/behavior"
 	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notedevices"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesapp/application"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notesscreens"
@@ -60,7 +61,12 @@ func Start(dataDir string) error {
 		_ = shared.App.Shutdown(context.Background())
 		return err
 	}
-	screens, err := notesscreens.New(shared.Service, attachments)
+	devices, err := notedevices.New(filepath.Join(dataDir, "mobile-devices"), shared.Data.User.GetID())
+	if err != nil {
+		_ = shared.App.Shutdown(context.Background())
+		return err
+	}
+	screens, err := notesscreens.NewWithDevices(shared.Service, attachments, devices)
 	if err != nil {
 		_ = shared.App.Shutdown(context.Background())
 		return err
@@ -70,7 +76,7 @@ func Start(dataDir string) error {
 		_ = shared.App.Shutdown(context.Background())
 		return err
 	}
-	runtime, err := nativeui.NewRuntime(screens, nativeui.RuntimeOptions{Drafts: drafts})
+	runtime, err := nativeui.NewRuntime(screens, nativeui.RuntimeOptions{Drafts: drafts, OnLock: devices.Lock, OnClose: devices.CloseRoute})
 	if err != nil {
 		_ = shared.App.Shutdown(context.Background())
 		return err

@@ -93,9 +93,13 @@ func collectionScreen(service *notes.Service) nativeui.Render {
 		request.Values["view"], request.Values["order"] = query.View, query.Order
 		request.Values["page"] = query.PageValue()
 		delete(request.Values, "row")
+		count := fmt.Sprintf("%d notes", len(items.Notes))
+		if len(items.Notes) == 1 {
+			count = "1 note"
+		}
 		list := &nativeui.List{
-			Header: "All notes", Footer: fmt.Sprintf("%d notes · Stored on this device", len(items.Notes)),
-			Empty:     "Make room for an idea.\nTap New note to start writing.",
+			Header: "All notes", Footer: count + " · Stored on this device",
+			Empty:     "No notes yet.\nTap New note to start writing.",
 			SearchKey: "search", SearchPlaceholder: "Search your notes", Refreshable: true,
 			Selection: &nativeui.Selection{Key: "selected", Selected: []string{}, Maximum: notes.MaximumSelection},
 			Filters: []nativeui.Field{

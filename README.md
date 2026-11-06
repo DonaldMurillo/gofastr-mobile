@@ -100,6 +100,13 @@ watch confirmed changes from the shared service. See [device services and
 acceptance limits](docs/mobile-services.md). Native Android uses the same Go
 protocol and screens. See [Windows and Android builds and acceptance](docs/android.md).
 
+[Incoming shares, secure storage with biometrics, and home-screen widgets](docs/device-features.md)
+also use shared Go requests with Android and iOS adapters. The Go-only
+`examples/devicefeatures/featuresnative` demo exercises their opt-in APIs.
+
+The [Notes integrations](docs/notes-device-features.md) add reviewed shared
+imports, explicitly selected note widgets, and biometric-protected text notes.
+
 The same Notes app now exercises [mobile components](docs/mobile-components.md):
 typed toggles/selects/date/time, filters and accumulated Load more, stable-ID
 multi-selection and bulk actions with undo, Notes/Files/Settings tabs, and row

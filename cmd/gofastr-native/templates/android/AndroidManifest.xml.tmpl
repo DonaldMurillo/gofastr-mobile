@@ -15,6 +15,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 {{if .MicrophoneUsage}}    <uses-permission android:name="android.permission.RECORD_AUDIO" />{{end}}
+{{if and .SecureStorage .BiometricUsage}}    <uses-permission android:name="android.permission.USE_BIOMETRIC" />{{end}}
 {{end}}
 
     <application
@@ -40,7 +41,22 @@
                 <data android:scheme="{{xml .URLScheme}}" />
             </intent-filter>
 {{end}}
+{{if .ReceiveShares}}
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+{{end}}
         </activity>
+{{if .Widgets}}
+        <meta-data android:name="dev.gofastr.nativeui.widgetScheme" android:value="{{xml .URLScheme}}" />
+        <receiver android:name="dev.gofastr.nativeui.HomeWidget" android:exported="false">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/gofastr_widget" />
+        </receiver>
+{{end}}
 {{if eq .Renderer "native"}}
         <provider android:name="dev.gofastr.nativeui.TransferProvider"
             android:authorities="{{xml .ID}}.transfers" android:exported="false" android:grantUriPermissions="true" />

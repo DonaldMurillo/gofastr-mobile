@@ -1,9 +1,11 @@
 # Mobile device services and live collections
 
-Implementation and acceptance guide, November 5, 2026. Application authors still
-write Go screens/actions. Ordinary library Swift and JavaScript adapt them; no
+Implementation and acceptance guide, November 6, 2026. Application authors still
+write Go screens/actions. Ordinary library Swift, Java, and JavaScript adapt them; no
 application-owned native screens, JavaScript, or behavior templates are required.
-GoFastr core remains unchanged. Native Android is deferred.
+GoFastr core remains unchanged. See [native Android](android.md) for its adapters
+and acceptance limits. [Share-in, secure storage, and widgets](device-features.md)
+add opt-in Go contracts for both native platforms.
 
 ## Four additions in the same Notes application
 

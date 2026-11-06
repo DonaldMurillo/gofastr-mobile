@@ -13,6 +13,9 @@ public final class GofastrServiceRunner: NSObject {
     private var dismissing = false
     private var scheduling = false
     private var cancellingSchedule = false
+    private let secureStorage = GofastrSecureStorage()
+    private var secureStorageActive = false
+    private var durableServiceActive = false
     private lazy var dismissalDelegate = MobileServiceDismissalDelegate { [weak self] in self?.cancel() }
 
     public init(presenter: UIViewController, openRoute: @escaping (String) -> Bool) {
@@ -25,6 +28,9 @@ public final class GofastrServiceRunner: NSObject {
     public static func capabilities() -> [String: String] {
         let purpose = Bundle.main.object(forInfoDictionaryKey: "NSMicrophoneUsageDescription") as? String
         return ["notifications/v1": "available", "sharing/v1": "available", "clipboard/v1": "available",
+                "secure-storage/v1": GofastrSecureStorage.enabled ? "available" : "unavailable",
+                "incoming-shares/v1": Bundle.main.object(forInfoDictionaryKey: "GofastrReceiveShares") as? Bool == true ? "available" : "unavailable",
+                "widgets/v1": Bundle.main.object(forInfoDictionaryKey: "GofastrWidgets") as? Bool == true ? "available" : "unavailable",
                 "audio/v1": purpose?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? "available" : "unavailable"]
     }
 
@@ -62,11 +68,33 @@ public final class GofastrServiceRunner: NSObject {
     public func cancel() {
         guard Thread.isMainThread else { DispatchQueue.main.async { self.cancel() }; return }
         guard let token = settlement.active else { return }
+        if secureStorageActive { secureStorage.cancel(); return }
+        if durableServiceActive { return }
         if scheduling { cancellingSchedule = true; return }
         finish(token, MobileServiceResult(status: "cancelled", message: "Device service cancelled."))
     }
 
     private func execute(_ request: MobileServiceRequest, token: UUID) {
+        if let secure = request.secureStorage {
+            secureStorageActive = true
+            secureStorage.perform(secure) { [weak self] result in
+                self?.secureStorageActive = false
+                self?.finish(token, result)
+            }
+            return
+        }
+        if let incoming = request.incomingShare {
+            guard Self.capabilities()["incoming-shares/v1"] == "available" else { finish(token, MobileServiceResult(status: "unsupported")); return }
+            durableServiceActive = true
+            MobileIncomingShares(groupIdentifier: Bundle.main.object(forInfoDictionaryKey: "GofastrAppGroup") as? String ?? "").perform(incoming) { [weak self] result in self?.finishDictionary(token, result) }
+            return
+        }
+        if let widget = request.widget {
+            guard Self.capabilities()["widgets/v1"] == "available" else { finish(token, MobileServiceResult(status: "unsupported")); return }
+            durableServiceActive = true
+            MobileWidgetStore(appGroup: Bundle.main.object(forInfoDictionaryKey: "GofastrAppGroup") as? String ?? "").perform(widget) { [weak self] result in self?.finishDictionary(token, result) }
+            return
+        }
         if let notification = request.notification { performNotification(notification, token: token); return }
         if let clipboard = request.clipboard {
             UIPasteboard.general.string = clipboard.text
@@ -79,6 +107,16 @@ public final class GofastrServiceRunner: NSObject {
         }
         if let share = request.share { performShare(share, token: token, presenter: presenter) }
         else if let audio = request.audio { performAudio(audio, token: token, presenter: presenter) }
+    }
+
+    private func finishDictionary(_ token: UUID, _ value: [String: Any]) {
+        guard settlement.active == token else { return }
+        durableServiceActive = false
+        guard let data = try? JSONSerialization.data(withJSONObject: value),
+              let result = try? JSONDecoder().decode(MobileServiceResult.self, from: data) else {
+            finish(token, MobileServiceResult(status: "failed")); return
+        }
+        finish(token, result)
     }
 
     private func performShare(_ request: MobileShareRequest, token: UUID, presenter: UIViewController) {

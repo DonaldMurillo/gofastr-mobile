@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.gofastr.featurefixture">
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="36" />
+    <queries><intent><action android:name="android.intent.action.MAIN" /></intent></queries>
+    <application android:label="Feature test fixture" android:debuggable="true" android:allowBackup="false" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".Fixture" android:exported="true" />
+        <provider android:name=".Fixture$Provider" android:authorities="dev.gofastr.featurefixture.files" android:exported="false" android:grantUriPermissions="true" />
+    </application>
+</manifest>

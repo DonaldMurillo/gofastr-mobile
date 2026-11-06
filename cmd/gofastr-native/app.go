@@ -71,6 +71,11 @@ type app struct {
 	CameraUsage     string
 	MicrophoneUsage string
 	URLScheme       string
+	ReceiveShares   bool
+	SecureStorage   bool
+	BiometricUsage  string
+	Widgets         bool
+	AppGroup        string
 	Extensions      []compiledExtension
 }
 

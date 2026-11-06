@@ -78,3 +78,28 @@ func writeSource(path string, content []byte) error {
 	}
 	return writeOwnerOnly(path, content)
 }
+
+func prepareAndroidFeatureResources(r *runner, sdk androidSDK, a app, dir string) ([]string, error) {
+	if !a.Widgets {
+		return nil, nil
+	}
+	resource := filepath.Join(dir, "res", "xml", "gofastr_widget.xml")
+	layout := filepath.Join(dir, "res", "layout", "gofastr_widget.xml")
+	if err := r.do("generate widget provider resources", func() error {
+		content, err := renderandroid.Resources.ReadFile("resources/layout/gofastr_widget.xml")
+		if err != nil {
+			return err
+		}
+		if err := writeSource(layout, content); err != nil {
+			return err
+		}
+		return writeRendered("templates/android/widget.xml.tmpl", resource, a)
+	}); err != nil {
+		return nil, err
+	}
+	compiled := filepath.Join(dir, "widget-resources.zip")
+	if err := r.run("compile widget provider resources", sdk.tool("aapt2"), "compile", "-o", compiled, resource, layout); err != nil {
+		return nil, err
+	}
+	return []string{"-R", compiled}, nil
+}

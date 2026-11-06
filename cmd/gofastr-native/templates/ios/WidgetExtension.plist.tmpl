@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>{{xml .Exe}}</string>
+<key>CFBundleIdentifier</key><string>{{xml .ID}}</string>
+<key>CFBundleName</key><string>{{xml .Name}}</string>
+<key>CFBundleDisplayName</key><string>{{xml .Name}}</string>
+<key>CFBundlePackageType</key><string>XPC!</string>
+<key>CFBundleShortVersionString</key><string>{{xml .Version}}</string>
+<key>CFBundleVersion</key><string>{{xml .Build}}</string>
+<key>MinimumOSVersion</key><string>{{xml .MinOS}}</string>
+<key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>
+<key>GofastrAppGroup</key><string>{{xml .AppGroup}}</string>
+<key>GofastrWidgetScheme</key><string>{{xml .URLScheme}}</string>
+<key>NSExtension</key><dict><key>NSExtensionPointIdentifier</key><string>com.apple.widgetkit-extension</string></dict>
+</dict></plist>

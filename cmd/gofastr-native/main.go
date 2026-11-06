@@ -50,6 +50,11 @@ Flags (build, run):
                 empty disables native camera access)
   --microphone-usage  optional microphone purpose text; empty disables recording
   --url-scheme  optional application-specific deep-link scheme (native renderer)
+  --receive-shares  accept shared text and files into the app's private inbox
+  --secure-storage  enable Keychain/Keystore storage and authentication
+  --biometric-usage  Face ID purpose text; required for secure storage on iOS
+  --widgets     package a home-screen widget; requires --url-scheme
+  --app-group   iOS app-group identifier for share and widget extensions
   --dry-run     print every step without running it
 
 Flags (run only):
@@ -91,10 +96,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	version := fs.String("version", "", "app version")
 	out := fs.String("out", "", "output directory")
 	hostTemplate := fs.String("host-template", "", "caller-owned native host template")
-	renderer := fs.String("renderer", "webview", "webview or native (iOS only)")
+	renderer := fs.String("renderer", "webview", "webview or native (iOS/Android)")
 	cameraUsage := fs.String("camera-usage", defaultCameraUsage, "iOS camera purpose string; empty disables native camera")
 	microphoneUsage := fs.String("microphone-usage", "", "iOS microphone purpose string; empty disables recording")
-	urlScheme := fs.String("url-scheme", "", "application-specific deep-link scheme (native iOS only)")
+	urlScheme := fs.String("url-scheme", "", "application-specific deep-link scheme (native renderer)")
+	receiveShares := fs.Bool("receive-shares", false, "enable the private incoming-share inbox")
+	secureStorage := fs.Bool("secure-storage", false, "enable secure storage and authentication")
+	biometricUsage := fs.String("biometric-usage", "", "Face ID purpose text")
+	widgets := fs.Bool("widgets", false, "package a home-screen widget")
+	appGroup := fs.String("app-group", "", "iOS app-group identifier")
 	dry := fs.Bool("dry-run", false, "print the steps only")
 	device := fs.String("device", "", "simulator / device / AVD")
 	shot := fs.String("screenshot", "", "screenshot path")
@@ -197,6 +207,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	a.CameraUsage = strings.TrimSpace(*cameraUsage)
 	a.MicrophoneUsage = strings.TrimSpace(*microphoneUsage)
 	a.URLScheme = *urlScheme
+	a.ReceiveShares, a.SecureStorage, a.Widgets = *receiveShares, *secureStorage, *widgets
+	a.BiometricUsage, a.AppGroup = strings.TrimSpace(*biometricUsage), *appGroup
+	if err := validateDeviceFeatures(a, *platform); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
 	dir := *out
 	if dir == "" {
 		dir = filepath.Join("dist", "mobile", *platform)

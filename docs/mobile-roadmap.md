@@ -1,6 +1,6 @@
 # Mobile presentation roadmap
 
-Implementation roadmap, updated November 5, 2026. The M1 shared-screen rendering proof
+Implementation roadmap, updated November 6, 2026. The M1 shared-screen rendering proof
 is implemented. Shared editor/runtime services and UI-independent startup now
 have working implementations; the remaining acceptance gaps are listed below.
 The current APIs and renderer differences are described in
@@ -17,8 +17,9 @@ platform controls, web markup, and host integration.
 
 Support three explicit paths:
 
-1. **Go mobile definitions to native controls:** UIKit today; Android native is
-   a later implementation milestone, not an existing capability.
+1. **Go mobile definitions to native controls:** UIKit and Android adapters now
+   implement the shared runtime. See [Android acceptance](android.md) and
+   [opt-in device features](device-features.md) for platform validation limits.
 2. **The same Go mobile definitions to mobile WebView:** a new renderer using
    the existing `mobileui` design system and public GoFastr web seams.
 3. **Existing GoFastr web applications in WebView:** preserve the current host

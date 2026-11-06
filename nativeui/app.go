@@ -298,6 +298,18 @@ func (app *App) Render(ctx context.Context, destination string, values map[strin
 		return Screen{}, err
 	}
 	screen.Route, screen.Values = request.Route, request.Values
+	if screen.Protection != nil {
+		if screen.Protection.LockRoute == screen.Route {
+			return Screen{}, errors.New("nativeui: a protected screen needs a separate lock route")
+		}
+		if _, err := app.Resolve(screen.Protection.LockRoute); err != nil {
+			return Screen{}, err
+		}
+		if screen.Form != nil && screen.Form.Draft != nil {
+			return Screen{}, errors.New("nativeui: protected forms cannot persist drafts")
+		}
+		screen.Requires = append(append([]Requirement(nil), screen.Requires...), Requirement{Capability: CapabilityPrivacy})
+	}
 	if screen.Live != nil && (route.Watch == nil || !validDataVersion(screen.Live.Version)) {
 		return Screen{}, errors.New("nativeui: a live screen requires a bounded version and watch handler")
 	}

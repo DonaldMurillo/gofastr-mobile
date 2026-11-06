@@ -120,8 +120,9 @@ enum MobileLocalRoute {
         let path: String
         if let scheme = parts.scheme {
             guard !["http", "https", "file", "ftp", "data", "javascript", "mailto", "tel", "sms", "about"].contains(scheme.lowercased()),
-                  let host = parts.host, !host.isEmpty, host.range(of: "^[A-Za-z0-9._~-]+$", options: .regularExpression) != nil else { return nil }
-            path = "/" + host + parts.percentEncodedPath
+                  parts.host == nil || parts.host?.range(of: "^[A-Za-z0-9._~-]+$", options: .regularExpression) != nil else { return nil }
+            if let host = parts.host { path = "/" + host + parts.percentEncodedPath }
+            else { path = parts.percentEncodedPath }
         } else {
             guard parts.host == nil else { return nil }
             path = parts.percentEncodedPath

@@ -1,8 +1,10 @@
 package files
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -54,6 +56,24 @@ func NewStore(directory string) (*Store, error) {
 
 // Put atomically stores a bounded attachment under an application-owned collection.
 func (store *Store) Put(ctx context.Context, collection string, document Document) (File, error) {
+	var identifier [16]byte
+	if _, err := rand.Read(identifier[:]); err != nil {
+		return File{}, err
+	}
+	return store.put(ctx, collection, document, hex.EncodeToString(identifier[:]), false)
+}
+
+// PutOnce binds an application import identity to immutable attachment bytes.
+// Repeating an interrupted import returns the same handle without using quota.
+func (store *Store) PutOnce(ctx context.Context, collection, identity string, document Document) (File, error) {
+	if identity == "" || len(identity) > 512 {
+		return File{}, errors.New("files: an import identity is required")
+	}
+	digest := sha256.Sum256([]byte("files.import.v1\x00" + collection + "\x00" + identity))
+	return store.put(ctx, collection, document, hex.EncodeToString(digest[:16]), true)
+}
+
+func (store *Store) put(ctx context.Context, collection string, document Document, handle string, once bool) (File, error) {
 	if err := document.Validate(); err != nil {
 		return File{}, err
 	}
@@ -67,6 +87,18 @@ func (store *Store) Put(ctx context.Context, collection string, document Documen
 		return File{}, err
 	}
 	defer root.Close()
+	if once {
+		existing, err := read(ctx, root, handle)
+		if err == nil {
+			if existing.Collection != collection || existing.Document.Name != document.Name || existing.Document.MediaType != document.MediaType || !bytes.Equal(existing.Document.Data, document.Data) {
+				return File{}, errors.New("files: import identity already contains different content")
+			}
+			return metadata(handle, document), nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return File{}, err
+		}
+	}
 	items, total, err := scan(ctx, root)
 	if err != nil {
 		return File{}, err
@@ -74,16 +106,18 @@ func (store *Store) Put(ctx context.Context, collection string, document Documen
 	if len(items) >= MaxStoredFiles || total+len(document.Data) > MaxStoredBytes {
 		return File{}, errors.New("files: attachment storage is full")
 	}
-	var identifier [16]byte
-	if _, err := rand.Read(identifier[:]); err != nil {
-		return File{}, err
-	}
-	handle := hex.EncodeToString(identifier[:])
 	encoded, err := json.Marshal(stored{Collection: collection, Document: document})
 	if err != nil {
 		return File{}, err
 	}
 	temporary := handle + ".tmp"
+	if once {
+		// One Store owns writes to this directory. An import may resume after
+		// process death before its temporary file was renamed or removed.
+		if err := root.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return File{}, err
+		}
+	}
 	output, err := root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return File{}, err
@@ -98,6 +132,9 @@ func (store *Store) Put(ctx context.Context, collection string, document Documen
 		return File{}, err
 	}
 	if err := root.Rename(temporary, handle+".json"); err != nil {
+		return File{}, err
+	}
+	if err := privatefile.SyncDirectory(store.root); err != nil {
 		return File{}, err
 	}
 	return metadata(handle, document), nil

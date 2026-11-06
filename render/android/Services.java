@@ -22,6 +22,7 @@ import java.util.function.Consumer;
 /** One foreground device operation, settled once through the Go-owned task ID. */
 public final class Services {
     private final GofastrActivity host;
+    private final SecureStorage secureStorage;
     private Consumer<JSONObject> result;
     private Consumer<Uri> picked;
     private Runnable permissionGranted;
@@ -35,7 +36,7 @@ public final class Services {
     private boolean recordingFinishing,disposed;
     private boolean fileTask;
     private static final int PICK=401, EXPORT=402, CAMERA=403, SHARE=404, MICROPHONE=405, NOTIFICATION=406;
-    Services(GofastrActivity host){this.host=host;TransferProvider.clean(host);}
+    Services(GofastrActivity host){this.host=host;this.secureStorage=new SecureStorage(host,host.workers);TransferProvider.clean(host);}
     public boolean busy(){return result!=null;}
     private boolean begin(Consumer<JSONObject> callback) {if(result!=null){callback.accept(JSON.object("status","failed"));return false;}result=callback;fileTask=false;return true;}
     private void finish(JSONObject outcome) {
@@ -108,6 +109,23 @@ public final class Services {
             }else if(request.has("share")) share(request.getJSONObject("share"));
             else if(request.has("notification")) notification(request.getJSONObject("notification"));
             else if(request.has("audio")) record(request.getJSONObject("audio"));
+            else if(request.has("incomingShare")) {
+                if(!host.incomingSharesEnabled()){finish(outcome("unsupported","The share inbox is disabled."));return;}
+                IncomingShares.perform(host,request.getJSONObject("incomingShare"),this::finish);
+            }
+            else if(request.has("secureStorage")) {
+                if(!host.secureStorageEnabled()){finish(outcome("unsupported","Secure storage is disabled."));return;}
+                JSONObject secure=request.getJSONObject("secureStorage");
+                if("biometric".equals(secure.optString("protection")) && !host.biometricsEnabled()){finish(outcome("unsupported","Biometric authentication is disabled."));return;}
+                secureStorage.perform(secure,value -> {
+                    if(!host.biometricsEnabled() && value.optJSONObject("secureStorage")!=null)GofastrActivity.put(value.optJSONObject("secureStorage"),"biometricAvailable",false);
+                    finish(value);
+                });
+            }
+            else if(request.has("widget")) {
+                if(!host.widgetsEnabled()){finish(outcome("unsupported","Widgets are disabled."));return;}
+                HomeWidget.perform(host,request.getJSONObject("widget"),this::finish);
+            }
             else finish(outcome("unsupported","This service is unavailable."));
         }catch(Exception e){failed(e);}
     }
@@ -182,8 +200,8 @@ public final class Services {
     }
     private void releaseRecorder(){if(recorder!=null){try{recorder.reset();recorder.release();}catch(Exception ignored){}recorder=null;}if(recordingFile!=null){recordingFile.delete();recordingFile=null;}}
     boolean back(){if(recordingDialog!=null){stopRecording(false);return true;}return busy();}
-    void pause(){if(recorder!=null)stopRecording(false);}
-    void dispose(){disposed=true;releaseRecorder();if(recordingDialog!=null)recordingDialog.dismiss();if(recordingLimit!=null)host.main.removeCallbacks(recordingLimit);releaseCapture();result=null;picked=null;permissionGranted=null;}
+    void pause(){if(recorder!=null)stopRecording(false);secureStorage.cancel();}
+    void dispose(){disposed=true;secureStorage.cancel();releaseRecorder();if(recordingDialog!=null)recordingDialog.dismiss();if(recordingLimit!=null)host.main.removeCallbacks(recordingLimit);releaseCapture();result=null;picked=null;permissionGranted=null;}
     void activityResult(int code,int status,Intent data) {
         if(code!=activityCode || result==null)return;
         if(code==SHARE){finish(outcome(status==Activity.RESULT_OK?"completed":"cancelled","Share sheet closed. Android does not confirm delivery."));return;}

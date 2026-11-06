@@ -218,10 +218,14 @@ func buildAndroid(r *runner, a app, out string) (string, error) {
 		return "", err
 	}
 	base := filepath.Join(work, "android", "base.apk")
-	if err := r.run("link the manifest into a base APK", sdk.tool("aapt2"), "link",
-		"-o", base, "--manifest", manifest, "-I", sdk.androidJar,
-		"--min-sdk-version", strconv.Itoa(a.MinSDK), "--target-sdk-version", strconv.Itoa(a.TargetSDK),
-		"--version-code", strconv.Itoa(a.VersionCode), "--version-name", a.Version); err != nil {
+	resourceArgs, err := prepareAndroidFeatureResources(r, sdk, a, filepath.Join(work, "android"))
+	if err != nil {
+		return "", err
+	}
+	if err := r.run("link the manifest into a base APK", sdk.tool("aapt2"),
+		append([]string{"link", "-o", base, "--manifest", manifest, "-I", sdk.androidJar,
+			"--min-sdk-version", strconv.Itoa(a.MinSDK), "--target-sdk-version", strconv.Itoa(a.TargetSDK),
+			"--version-code", strconv.Itoa(a.VersionCode), "--version-name", a.Version}, resourceArgs...)...); err != nil {
 		return "", err
 	}
 	unsigned := filepath.Join(work, "android", "unsigned.apk")

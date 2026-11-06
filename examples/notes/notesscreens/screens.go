@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/examples/notes/notedevices"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
 	"github.com/DonaldMurillo/gofastr-native/extension"
 	"github.com/DonaldMurillo/gofastr-native/extensions/media"
@@ -27,6 +28,16 @@ func New(service *notes.Service, stores ...*files.Store) (*nativeui.App, error) 
 	if len(stores) == 1 {
 		attachments = stores[0]
 	}
+	return newApp(service, attachments, nil)
+}
+
+// NewWithDevices adds installation-owned reviewed shares and protected-note
+// metadata. Platform prompts and encrypted records stay in the device adapters.
+func NewWithDevices(service *notes.Service, attachments *files.Store, devices *notedevices.Store) (*nativeui.App, error) {
+	return newApp(service, attachments, devices)
+}
+
+func newApp(service *notes.Service, attachments *files.Store, devices *notedevices.Store) (*nativeui.App, error) {
 	routes := []nativeui.Route{
 		collectionRoute(service),
 		nativeui.Route{Path: "/notes/new", Screen: editor(service, attachments), Actions: editorActions(service, attachments), Services: editorServices(service, attachments)},
@@ -35,6 +46,9 @@ func New(service *notes.Service, stores ...*files.Store) (*nativeui.App, error) 
 		aboutRoute("/settings/about", "pop"),
 	}
 	routes = append(append(append(routes, fileRoutes(service, attachments)...), behaviorRoutes()...), settingsRoute())
+	if devices != nil {
+		routes = withDeviceFeatures(routes, service, attachments, devices)
+	}
 	return nativeui.NewWithExtensions(Root, []extension.Definition{photos.Definition(), media.Definition()}, tabShell(routes)...)
 }
 

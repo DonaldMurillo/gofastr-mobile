@@ -27,6 +27,13 @@ type Screen struct {
 	ActiveTab   string                `json:"activeTab,omitempty"`
 	Live        *Live                 `json:"live,omitempty"`
 	Components  []extension.Component `json:"components,omitempty"`
+	Protection  *ScreenProtection     `json:"protection,omitempty"`
+}
+
+// ScreenProtection marks foreground-only content. Native hosts hide it in app
+// snapshots and retire it on background. Its forms cannot use durable drafts.
+type ScreenProtection struct {
+	LockRoute string `json:"lockRoute"`
 }
 
 type Tab struct {
@@ -148,6 +155,10 @@ type Request struct {
 	Route  string
 	Params map[string]string
 	Values map[string]string
+	// Service and ServiceValues are immutable admitted inputs, populated only
+	// for a device-service continuation. Values may contain newer editor text.
+	Service       *ServiceRequest
+	ServiceValues map[string]string
 }
 
 // Navigation requests one native stack operation. Push and sheet destinations

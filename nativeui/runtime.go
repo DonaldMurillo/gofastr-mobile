@@ -22,6 +22,10 @@ type RuntimeOptions struct {
 	Now         func() time.Time
 	MaxSessions int
 	IdleTimeout time.Duration
+	// OnLock revokes application-owned foreground grants. OnClose releases an
+	// individual route's grant. Neither callback may reenter the runtime.
+	OnLock  func()
+	OnClose func(string)
 }
 
 // Runtime coordinates local screen instances and commands without owning a
@@ -38,6 +42,7 @@ type Runtime struct {
 	watchSlots         chan struct{}
 	connections        map[string]runtimeConnection
 	sessions           map[string]*runtimeSession
+	privacyGeneration  uint64
 }
 
 type runtimeConnection struct {
@@ -71,6 +76,7 @@ type runtimeSession struct {
 	watchRetired    bool
 	watchWorker     bool
 	uncertain       bool
+	privacyRevoked  bool
 }
 
 type runtimeAction struct {
@@ -176,6 +182,14 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 		reply.Error = commandFailure("expired", "This renderer connection expired. Reopen the screen; actions were not retried.")
 		return reply
 	}
+	if command.Kind == "lock" {
+		if connection.contract.Capabilities[CapabilityPrivacy] != SupportAvailable {
+			reply.Error = commandFailure("unsupported", "Protected screens are unavailable in this renderer.")
+			return reply
+		}
+		runtime.lockConnection(command.Connection)
+		return reply
+	}
 	if command.Kind == "open" {
 		return runtime.open(ctx, command, connection.contract, reply)
 	}
@@ -204,12 +218,18 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 		if session.active {
 			reply.Error = commandFailure("pending", "Wait for the pending action before closing this screen.")
 		} else {
+			if runtime.options.OnClose != nil {
+				runtime.options.OnClose(session.screen.Route)
+			}
 			session.closed = true
 			runtime.cancelWatch(session)
 			runtime.releasePresentation(session)
 			runtime.releaseFiles(session)
 			runtime.releaseService(session)
 			runtime.releaseDraft(session)
+			if session.screen.Protection != nil {
+				runtime.scrubProtected(session)
+			}
 		}
 		return reply
 	}
@@ -276,6 +296,9 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 }
 
 func (runtime *Runtime) open(ctx context.Context, command Command, contract Contract, reply Reply) Reply {
+	runtime.mu.Lock()
+	privacyGeneration := runtime.privacyGeneration
+	runtime.mu.Unlock()
 	screen, err := runtime.app.Render(ctx, command.Route, command.Values)
 	if err != nil {
 		reply.Error = safeFailure(err)
@@ -347,6 +370,11 @@ func (runtime *Runtime) open(ctx context.Context, command Command, contract Cont
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
+	if screen.Protection != nil && privacyGeneration != runtime.privacyGeneration {
+		reply.Instance = ""
+		reply.Error = commandFailure("expired", "This protected screen was locked while opening. Open it again to authenticate.")
+		return reply
+	}
 	runtime.expire()
 	if len(runtime.sessions) >= runtime.options.MaxSessions {
 		rollbackOwner()
@@ -463,6 +491,9 @@ func (runtime *Runtime) action(ctx context.Context, session *runtimeSession, com
 				session.uncertain = true
 			}
 		}
+	}
+	if runtime.finishRevoked(session, &reply) {
+		return reply
 	}
 	observed := record.response
 	observed.Service = cloneService(observed.Service)
@@ -713,6 +744,9 @@ func (runtime *Runtime) expire() {
 	for identifier, session := range runtime.sessions {
 		session.mu.Lock()
 		if !session.active && (session.closed || now.Sub(session.used) > runtime.options.IdleTimeout) {
+			if !session.closed && runtime.options.OnClose != nil {
+				runtime.options.OnClose(session.screen.Route)
+			}
 			session.closed = true
 			runtime.cancelWatch(session)
 			runtime.releasePresentation(session)

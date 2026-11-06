@@ -43,6 +43,12 @@
 	<string>{{xml .CameraUsage}}</string>
 {{end}}{{if .MicrophoneUsage}}	<key>NSMicrophoneUsageDescription</key>
 	<string>{{xml .MicrophoneUsage}}</string>
+{{end}}{{if .SecureStorage}}	<key>GofastrSecureStorage</key><true/>
+	<key>NSFaceIDUsageDescription</key><string>{{xml .BiometricUsage}}</string>
+{{end}}{{if .ReceiveShares}}	<key>GofastrReceiveShares</key><true/>
+{{end}}{{if .Widgets}}	<key>GofastrWidgets</key><true/>
+	<key>GofastrWidgetScheme</key><string>{{xml .URLScheme}}</string>
+{{end}}{{if .AppGroup}}	<key>GofastrAppGroup</key><string>{{xml .AppGroup}}</string>
 {{end}}	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>

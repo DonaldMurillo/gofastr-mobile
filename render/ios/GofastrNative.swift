@@ -47,15 +47,15 @@ struct MobileForm: Decodable {
 
 struct MobileScreen: Decodable {
     var route: String
-    let title: String
-    let prompt: String?
+    var title: String
+    var prompt: String?
     let largeTitle: Bool?
-    let values: [String: String]?
-    let actions: [MobileAction]?
-    let list: MobileList?
+    var values: [String: String]?
+    var actions: [MobileAction]?
+    var list: MobileList?
     var form: MobileForm?
-    let text: String?
-    let filePreview: MobileFilePreview?
+    var text: String?
+    var filePreview: MobileFilePreview?
     var images: [MobileImage]?
     var attachments: [MobileAttachment]?
     var components: [MobileComponent]?
@@ -63,6 +63,11 @@ struct MobileScreen: Decodable {
     let activeTab: String?
     let requires: [MobileRequirement]?
     let live: MobileLive?
+    let protection: MobileScreenProtection?
+}
+
+struct MobileScreenProtection: Decodable {
+    let lockRoute: String
 }
 
 struct MobileNavigation: Decodable {
@@ -227,7 +232,7 @@ final class MobileHost {
         let capabilities = [
             "navigation/v1": "available", "editor/v1": "available", "drafts/v1": "available",
             "share/v1": "available", "haptics/v1": "available", "sheets/v1": "available", "announcement/v1": "available",
-            "presentation/v1": "available", "files/v1": "available", "live/v1": "available"
+            "presentation/v1": "available", "files/v1": "available", "live/v1": "available", "privacy/v1": "available"
         ].merging(GofastrServiceRunner.capabilities()) { _, service in service }
             .merging(MobileFileExtensions.capabilities()) { _, service in service }
             .merging(MobileComponentExtensions.capabilities()) { _, service in service }
@@ -251,6 +256,8 @@ public final class GofastrNativeRenderer {
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var checkpointBatches: [UUID: MobileCheckpointBatch] = [:]
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var privacyCover: UIView?
+    private var privacyLockPending = false
 
     public init(backend: GofastrNativeBackend) {
         host = MobileHost(backend)
@@ -313,6 +320,7 @@ public final class GofastrNativeRenderer {
         for name in [UIApplication.willResignActiveNotification, UIApplication.didEnterBackgroundNotification] {
             lifecycleObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.suspend() })
         }
+        lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.lockProtectedScreens() })
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in self?.resume() })
         lifecycleObservers.append(NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in self?.checkpoint() })
         return window
@@ -338,7 +346,7 @@ public final class GofastrNativeRenderer {
                   response.version == 1, let screen = response.screen, response.navigation == nil,
                   response.presentation == nil, response.files == nil, response.service == nil, response.share == nil else { return nil }
             let services = GofastrServiceRunner.capabilities().filter { $0.value == "available" }.map(\.key)
-            let available = Set(["navigation/v1", "editor/v1", "drafts/v1", "share/v1", "haptics/v1", "sheets/v1", "announcement/v1", "presentation/v1", "files/v1", "live/v1"] + services + extensionCapabilities)
+            let available = Set(["navigation/v1", "editor/v1", "drafts/v1", "share/v1", "haptics/v1", "sheets/v1", "announcement/v1", "presentation/v1", "files/v1", "live/v1", "privacy/v1"] + services + extensionCapabilities)
             return (screen.requires ?? []).allSatisfy { available.contains($0.capability) } ? screen : nil
         }
         guard let target else { return false }
@@ -379,6 +387,13 @@ public final class GofastrNativeRenderer {
     public func suspend() {
         guard Thread.isMainThread else { DispatchQueue.main.async { self.suspend() }; return }
         guard !stopped else { return }
+        if retainedScreens.contains(where: { $0.protectionReturnRoute != nil }), privacyCover == nil, let window {
+            let cover = UIView(frame: window.bounds)
+            cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            cover.backgroundColor = .systemBackground
+            window.addSubview(cover)
+            privacyCover = cover
+        }
         host.active = false
         retainedScreens.forEach { $0.suspendReads() }
         checkpoint()
@@ -386,9 +401,43 @@ public final class GofastrNativeRenderer {
 
     public func resume() {
         guard Thread.isMainThread else { DispatchQueue.main.async { self.resume() }; return }
-        guard !stopped, UIApplication.shared.applicationState == .active else { return }
+        guard !stopped, !privacyLockPending, UIApplication.shared.applicationState == .active else { return }
+        privacyCover?.removeFromSuperview()
+        privacyCover = nil
         host.active = true
         retainedScreens.forEach { $0.resumeVisibleReads() }
+    }
+
+    private func lockProtectedScreens() {
+        guard !privacyLockPending, retainedScreens.contains(where: { $0.protectionReturnRoute != nil }) else { return }
+        privacyLockPending = true
+        host.foreground.cancel()
+        if let tabs = window?.rootViewController as? MobileTabController {
+            tabs.retireProtectedScreens()
+        } else if let navigation = window?.rootViewController as? UINavigationController {
+            let retained = navigation.viewControllers.filter { controller in
+                guard let screen = controller as? NativeScreenController, screen.protectionReturnRoute != nil else { return true }
+                screen.retireProtectedScreen()
+                return false
+            }
+            navigation.setViewControllers(retained, animated: false)
+        }
+        host.command(["kind": "lock"]) { [weak self] result in
+            guard let self else { return }
+            guard case .success(let reply) = result, reply.error == nil else {
+                if let cover = self.privacyCover {
+                    let message = UILabel(frame: cover.bounds.insetBy(dx: 24, dy: 24))
+                    message.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                    message.numberOfLines = 0
+                    message.textAlignment = .center
+                    message.text = "Protected notes are locked. Restart Notes to continue."
+                    cover.addSubview(message)
+                }
+                return
+            }
+            self.privacyLockPending = false
+            self.resume()
+        }
     }
 
     private var retainedScreens: [NativeScreenController] {
@@ -515,10 +564,12 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     private var operationUnconfirmed = false
     private var renderedMutationRevision: Int
     private var navigationPermit = -1
+    private var privacyRevoked = false
+    let protectionReturnRoute: String?
     var skipRefreshOnAppear = false
     var route: String { screen.route }
     var draftKey: String? { screen.form?.draft?.key }
-    var navigationBlocked: Bool { !host.active || busy || operationUnconfirmed || host.foreground.isActive || editor?.pending == true || editor?.unknown == true }
+    var navigationBlocked: Bool { privacyRevoked || !host.active || busy || operationUnconfirmed || host.foreground.isActive || editor?.pending == true || editor?.unknown == true }
     var hasUncertainEditor: Bool { operationUnconfirmed || editor?.pending == true || editor?.unknown == true }
     var navigationStillSafe: Bool { !navigationBlocked && navigationPermit == bufferRevision }
     private var dirty: Bool { screen.form != nil && fieldValues != baseline }
@@ -526,6 +577,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     init(_ screen: MobileScreen, host: MobileHost, reply: MobileReply? = nil) {
         self.screen = screen
         self.host = host
+        protectionReturnRoute = screen.protection?.lockRoute
         instance = reply?.instance
         editor = reply?.editor
         bufferRevision = reply?.revision ?? 0
@@ -1166,6 +1218,13 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         loadViewIfNeeded()
         guard !navigationBlocked, presentedViewController == nil else { completion(false); return }
         guard dirty else { navigationPermit = bufferRevision; completion(true); return }
+        if protectionReturnRoute != nil {
+            discardProtectedChanges { [weak self] safe in
+                if safe { self?.navigationPermit = self?.bufferRevision ?? -1 }
+                completion(safe)
+            }
+            return
+        }
         guard instance != nil else {
             navigationPermit = bufferRevision
             completion(screen.form?.draft != nil)
@@ -1188,6 +1247,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     func closeSession() {
+        guard !privacyRevoked else { return }
         componentViews?.dispose()
         guard !hasUncertainEditor, !busy else { return }
         cancelWatch()
@@ -1196,6 +1256,36 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         pendingSearch?.cancel()
         send("close") { _ in }
         instance = nil
+    }
+
+    func retireProtectedScreen() {
+        guard protectionReturnRoute != nil, !privacyRevoked else { return }
+        privacyRevoked = true
+        suspendReads()
+        pendingCheckpoint?.cancel()
+        pendingCheckpoint = nil
+        instance = nil
+        editor = nil
+        baseline.removeAll()
+        actionValues.removeAll()
+        listQuery.removeAll()
+        for input in inputs.values {
+            (input as? UITextField)?.text = ""
+            (input as? UITextView)?.text = ""
+        }
+        inputs.removeAll()
+        screen.title = "Locked"
+        screen.prompt = nil
+        screen.values = nil
+        screen.form = nil
+        screen.list = nil
+        screen.text = "Protected content locked."
+        screen.filePreview = nil
+        screen.images = nil
+        screen.attachments = nil
+        screen.components = nil
+        screen.actions = nil
+        if isViewLoaded { view.subviews.forEach { $0.removeFromSuperview() } }
     }
 
     func setNavigationInFlight(_ value: Bool) { setBusy(value) }
@@ -1214,7 +1304,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     func resumeVisibleReads() {
-        guard isViewLoaded, liveVisible, view.window != nil, navigationController?.topViewController === self else { return }
+        guard !privacyRevoked, isViewLoaded, liveVisible, view.window != nil, navigationController?.topViewController === self else { return }
         componentViews?.activate(screen.components ?? [])
         liveReadRecovery.reset()
         if screen.list != nil && !watchPaused && (listNeedsRefresh || renderedMutationRevision != host.mutationRevision) { refresh() }
@@ -1227,6 +1317,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func checkpointEditor(completion: @escaping (Bool) -> Void) {
+        guard !privacyRevoked else { completion(false); return }
         pendingCheckpoint?.cancel()
         pendingCheckpoint = nil
         guard !checkpointDeferral.hold(completion) else { return }
@@ -1352,6 +1443,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
             input = typed
         } else if field.kind == "multiline" {
             let text = UITextView()
+            if protectionReturnRoute != nil { text.autocorrectionType = .no; text.spellCheckingType = .no }
             text.text = field.value
             text.font = .preferredFont(forTextStyle: field.style == "title" ? .title1 : .body)
             text.backgroundColor = .clear
@@ -1366,6 +1458,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
             input = text
         } else {
             let text = UITextField()
+            if protectionReturnRoute != nil { text.autocorrectionType = .no; text.spellCheckingType = .no; text.textContentType = nil }
             text.text = field.value
             text.placeholder = field.placeholder
             text.font = .preferredFont(forTextStyle: field.style == "title" ? .title1 : .body)
@@ -1623,6 +1716,14 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     private func updateBack() {
         let uncertain = editor?.unknown == true
         let blocked = busy || operationUnconfirmed || host.foreground.isActive || editor?.pending == true || editor?.unknown == true
+        if protectionReturnRoute != nil && screen.form != nil {
+            navigationItem.hidesBackButton = dirty || blocked
+            navigationItem.leftBarButtonItem = dirty ? UIBarButtonItem(title: "Back", style: .plain, target: self, action: #selector(close)) : nil
+            navigationItem.leftBarButtonItem?.isEnabled = !blocked
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = !dirty && !blocked
+            navigationController?.isModalInPresentation = dirty || blocked
+            return
+        }
         guard let draft = screen.form?.draft else {
             navigationItem.hidesBackButton = blocked
             navigationController?.interactivePopGestureRecognizer?.isEnabled = !blocked
@@ -1637,12 +1738,33 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     @objc private func close() {
+        if protectionReturnRoute != nil {
+            guard !navigationBlocked else { return }
+            discardProtectedChanges { [weak self] safe in if safe { self?.navigationController?.popViewController(animated: true) } }
+            return
+        }
         guard !navigationBlocked, let draft = screen.form?.draft else { return }
         let alert = UIAlertController(title: draft.title, message: draft.message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: draft.keepEditing, style: .cancel))
         alert.addAction(UIAlertAction(title: draft.keepDraft, style: .default) { [weak self] _ in self?.leave("keep") })
         alert.addAction(UIAlertAction(title: draft.discard, style: .destructive) { [weak self] _ in
             self?.leave("discard")
+        })
+        present(alert, animated: true)
+    }
+
+    private func discardProtectedChanges(_ completion: @escaping (Bool) -> Void) {
+        let alert = UIAlertController(title: "Discard unsaved protected text?", message: "Protected drafts stay in memory and clear when Notes goes to the background.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Keep editing", style: .cancel) { _ in completion(false) })
+        alert.addAction(UIAlertAction(title: "Discard changes", style: .destructive) { [weak self] _ in
+            guard let self else { completion(false); return }
+            self.send("leave", extra: ["choice": "discard"]) { result in
+                guard case .success(let reply) = result, reply.error == nil, let editor = reply.editor, editor.canLeave else { completion(false); return }
+                self.editor = editor
+                self.baseline = editor.baseline
+                for (key, value) in editor.values { self.setFieldValue(value, key: key) }
+                completion(true)
+            }
         })
         present(alert, animated: true)
     }
@@ -1700,11 +1822,14 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func send(_ kind: String, extra: [String: Any] = [:], completion: @escaping (Result<MobileReply, Error>) -> Void) {
-        guard let instance else { return }
+        guard !privacyRevoked, let instance else { return }
         if kind != "checkpoint" { checkpointFence.invalidate() }
         var fields: [String: Any] = ["kind": kind, "instance": instance, "revision": bufferRevision, "values": values]
         fields.merge(extra) { _, new in new }
-        host.command(fields, completion: completion)
+        host.command(fields) { [weak self] result in
+            guard self?.privacyRevoked == false else { return }
+            completion(result)
+        }
     }
 
     private func leave(_ choice: String) {

@@ -71,6 +71,8 @@ func Open(dataDir string, options ...framework.AppOption) (*Application, error) 
 			{Name: "tag", Type: schema.String},
 			{Name: "reminder_date", Type: schema.String},
 			{Name: "reminder_time", Type: schema.String},
+			{Name: "source_id", Type: schema.String, Unique: true, ReadOnly: true},
+			{Name: "source_complete", Type: schema.Bool, ReadOnly: true, Default: false},
 		},
 	})
 	return &Application{App: app, Data: data, Service: Service(app)}, nil

@@ -221,7 +221,7 @@ final class MobileTabController: UITabBarController, UITabBarControllerDelegate,
         guard !restoring, tabModels.indices.contains(selectedIndex) else { return }
         var stacks: [String: [String]] = [:]
         for (index, tab) in tabModels.enumerated() {
-            let controllers = navigations[index].viewControllers.compactMap { $0 as? NativeScreenController }
+            let controllers = navigations[index].viewControllers.compactMap { $0 as? NativeScreenController }.filter { $0.protectionReturnRoute == nil }
             let routes = controllers.prefix(MobileNavigationMetadata.maximumDepth).map(\.route)
             if routes.first == tab.route, routes.allSatisfy({ MobileLocalRoute.validate($0) != nil }) { stacks[tab.id] = routes }
         }
@@ -230,4 +230,16 @@ final class MobileTabController: UITabBarController, UITabBarControllerDelegate,
     }
 
     var retainedScreens: [NativeScreenController] { navigations.flatMap(\.viewControllers).compactMap { $0 as? NativeScreenController } }
+
+    func retireProtectedScreens() {
+        for navigation in navigations {
+            let retained = navigation.viewControllers.filter { controller in
+                guard let screen = controller as? NativeScreenController, screen.protectionReturnRoute != nil else { return true }
+                screen.retireProtectedScreen()
+                return false
+            }
+            navigation.setViewControllers(retained, animated: false)
+        }
+        persist()
+    }
 }

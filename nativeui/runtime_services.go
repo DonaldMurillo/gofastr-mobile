@@ -148,9 +148,13 @@ func (runtime *Runtime) serviceResult(ctx context.Context, session *runtimeSessi
 			err = errors.New("nativeui: service continuation is no longer registered")
 		} else {
 			var result Result
+			request.Service, request.ServiceValues = cloneService(&definition), maps.Clone(pending.values)
 			result, err = continuation(ctx, request, outcome)
 			if err == nil && outcome.Status != EffectCompleted && (result.Saved != nil || result.ClearDraft) {
 				err = errors.New("nativeui: an unsuccessful service cannot commit editor state")
+			}
+			if err == nil && result.Saved != nil && !definition.Commit {
+				err = errors.New("nativeui: a read-only service cannot commit an editor")
 			}
 			if err == nil {
 				response, err = runtime.app.result(ctx, route, result)
@@ -162,12 +166,24 @@ func (runtime *Runtime) serviceResult(ctx context.Context, session *runtimeSessi
 	}
 	session.mu.Lock()
 	session.active, record.finished, record.response = false, true, response
+	if err == nil && response.Saved != nil && session.editor != nil {
+		begin := session.editor.Begin(editorValues(screen, pending.values))
+		if !begin.Admitted {
+			err = errors.New("nativeui: saved service editor could not settle")
+		} else {
+			record.submitted = begin.Submission
+			session.editor.Checkpoint(editorValues(screen, values))
+		}
+	}
 	if err != nil {
 		record.failure = safeFailure(err)
 		if definition.Commit && record.failure.Code == "internal" {
 			session.uncertain, record.unknown = true, true
 			record.failure = commandFailure("unknown", "The service mutation outcome is unknown. Inspect the data before trying again; it was not retried.")
 		}
+	}
+	if runtime.finishRevoked(session, &reply) {
+		return reply
 	}
 	result := record.response
 	result.Service = cloneService(result.Service)

@@ -17,8 +17,6 @@ import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.Log;
 import android.view.Gravity;
-import android.view.GestureDetector;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
@@ -43,6 +41,10 @@ public abstract class GofastrActivity extends Activity {
     protected String urlScheme() { return ""; }
     protected boolean cameraEnabled() { return false; }
     protected boolean microphoneEnabled() { return false; }
+    protected boolean incomingSharesEnabled() { return false; }
+    protected boolean secureStorageEnabled() { return false; }
+    protected boolean biometricsEnabled() { return false; }
+    protected boolean widgetsEnabled() { return false; }
     private static final ExecutorService lifecycle = Executors.newSingleThreadExecutor();
     final ExecutorService workers = Executors.newFixedThreadPool(4);
     private final ExecutorService snapshots = Executors.newSingleThreadExecutor();
@@ -56,8 +58,12 @@ public abstract class GofastrActivity extends Activity {
     private Frame current;
     private boolean destroyed, started, foreground, navigationPending;
     private int watchGeneration;
+    private int privacyGeneration;
+    private boolean privacyLockPending;
+    private String lockedDestination="";
     private AlertDialog presentation;
     private Services services;
+    final Appearance appearance = new Appearance(this);
 
     @Override public void onCreate(Bundle state) {
         setTheme(dark()?android.R.style.Theme_Material_NoActionBar:android.R.style.Theme_Material_Light_NoActionBar);
@@ -65,6 +71,7 @@ public abstract class GofastrActivity extends Activity {
         backend = createBackend();
         if(android.os.Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,()->onBackPressed());
         services = new Services(this);
+        if (incomingSharesEnabled()) captureIncomingShare(getIntent(), state);
         shell = column(); shell.setBackgroundColor(background());
         shell.setOnApplyWindowInsetsListener((v, insets) -> {
             int bottom = insets.getSystemWindowInsetBottom();
@@ -73,7 +80,7 @@ public abstract class GofastrActivity extends Activity {
         });
         bar = row(); shell.addView(bar);
         viewport = new FrameLayout(this); shell.addView(viewport, new LinearLayout.LayoutParams(-1, 0, 1));
-        tabs = row(); shell.addView(tabs); setContentView(shell);
+        tabs = row(); shell.addView(tabs); setContentView(shell); systemBars();
         viewport.addView(text("Opening app...", 18));
         pendingRoute = routeFrom(getIntent());
         if (state != null && pendingRoute.isEmpty()) pendingRoute = state.getString("route", "");
@@ -81,8 +88,11 @@ public abstract class GofastrActivity extends Activity {
             try {
                 backend.start(getFilesDir().getAbsolutePath()+"/app");
                 Map<String,String> caps = new LinkedHashMap<>();
-                for(String name: new String[]{"navigation", "editor", "drafts", "share", "haptics", "sheets", "announcement", "presentation", "files", "sharing", "clipboard", "live", "notifications"}) caps.put(name+"/v1", "available");
+                for(String name: new String[]{"navigation", "editor", "drafts", "share", "haptics", "sheets", "announcement", "presentation", "files", "sharing", "clipboard", "live", "notifications", "privacy"}) caps.put(name+"/v1", "available");
                 caps.put("audio/v1", microphoneEnabled() ? "available" : "unavailable");
+                caps.put("incoming-shares/v1", incomingSharesEnabled() ? "available" : "unavailable");
+                caps.put("secure-storage/v1", secureStorageEnabled() ? "available" : "unavailable");
+                caps.put("widgets/v1", widgetsEnabled() ? "available" : "unavailable");
                 caps.putAll(Extensions.capabilities(this));
                 JSONObject reply = command(JSON.object("kind","hello", "hello", JSON.object("minimum",1,"maximum",1,"renderer","android","capabilities",new JSONObject(caps))));
                 if (reply.has("error")) throw new IllegalStateException(reply.optJSONObject("error").optString("message"));
@@ -92,24 +102,81 @@ public abstract class GofastrActivity extends Activity {
         });
     }
 
-    @Override protected void onResume() { super.onResume(); foreground=true; if(current!=null){Frame frame=current;frame.recovered=false;if(frame.deferredResponse!=null){JSONObject response=frame.deferredResponse,reply=frame.deferredReply;frame.deferredResponse=null;frame.deferredReply=null;apply(frame,response,reply);}if(!frame.busy)watch(frame);} }
-    @Override public void onConfigurationChanged(Configuration configuration){super.onConfigurationChanged(configuration);setTheme(dark()?android.R.style.Theme_Material_NoActionBar:android.R.style.Theme_Material_Light_NoActionBar);shell.setBackgroundColor(background());for(ArrayList<Frame> stack:stacks.values())for(Frame frame:stack){restyle(frame.content);frame.update();}toolbar();}
-    private void restyle(View view){if(view instanceof TextView)((TextView)view).setTextColor(ink());if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++)restyle(group.getChildAt(i));}}
+    @Override protected void onResume() { super.onResume(); foreground=true; reopenLocked();if(current!=null){Frame frame=current;frame.recovered=false;if(frame.deferredResponse!=null){JSONObject response=frame.deferredResponse,reply=frame.deferredReply;frame.deferredResponse=null;frame.deferredReply=null;apply(frame,response,reply);}if(!frame.busy)watch(frame);} }
+    @Override public void onConfigurationChanged(Configuration configuration){super.onConfigurationChanged(configuration);setTheme(dark()?android.R.style.Theme_Material_NoActionBar:android.R.style.Theme_Material_Light_NoActionBar);shell.setBackgroundColor(background());appearance.refresh();systemBars();for(ArrayList<Frame> stack:stacks.values())for(Frame frame:stack)frame.update();toolbar();}
+    private void systemBars() {
+        getWindow().setStatusBarColor(background());
+        getWindow().setNavigationBarColor(background());
+        int flags = dark() ? 0 : View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        if(android.os.Build.VERSION.SDK_INT >= 26 && !dark()) flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        getWindow().getDecorView().setSystemUiVisibility(flags);
+    }
     @Override protected void onPause() {
         foreground=false; stopWatch(); if(current!=null)current.suspend(); checkpoint(current, null); services.pause();
+        lockProtectedFrames();
         super.onPause();
     }
     @Override protected void onSaveInstanceState(Bundle state) {
-        if(current!=null) state.putString("route", current.screen.optString("route"));
+        if(getIntent()!=null && getIntent().hasExtra(IncomingShares.TOKEN)) state.putString(IncomingShares.TOKEN, getIntent().getStringExtra(IncomingShares.TOKEN));
+        if(current!=null) { JSONObject protection=current.screen.optJSONObject("protection");state.putString("route",protection==null?current.screen.optString("route"):protection.optString("lockRoute")); }
         checkpoint(current, null); super.onSaveInstanceState(state);
+    }
+
+    private void lockProtectedFrames() {
+        boolean found=false;
+        for(ArrayList<Frame> frames:stacks.values()) {
+            Iterator<Frame> iterator=frames.iterator();
+            while(iterator.hasNext()) {
+                Frame frame=iterator.next();
+                JSONObject protection=frame.screen.optJSONObject("protection");
+                if(protection==null)continue;
+                found=true;
+                if(frame==current)lockedDestination=protection.optString("lockRoute");
+                frame.retired=true;frame.updating=true;frame.dispose();
+                for(View control:frame.controls.values())if(control instanceof EditText)((EditText)control).setText("");
+                frame.controls.clear();frame.values.clear();frame.editor=null;
+                frame.deferredResponse=null;frame.deferredReply=null;
+                frame.screen=JSON.object("route",protection.optString("lockRoute"),"title","Locked","text","Protected note locked.");
+                frame.content.removeAllViews();iterator.remove();
+            }
+        }
+        if(!found)return;
+        privacyGeneration++;navigationPending=false;privacyLockPending=true;
+        if(current!=null && current.retired) {
+            ArrayList<Frame> frames=stack();
+            current=null;viewport.removeAllViews();
+            if(!frames.isEmpty())show(frames.get(frames.size()-1));
+        }
+        JSONObject request=JSON.object("kind","lock","connection",connection);
+        shortCall(request,reply->{privacyLockPending=false;if(error(reply,current))return;reopenLocked();});
+    }
+
+    private void reopenLocked() {
+        if(!foreground || privacyLockPending || lockedDestination.isEmpty() || !started)return;
+        String route=lockedDestination;lockedDestination="";
+        if(current==null || !current.screen.optString("route").equals(route))open(route,new LinkedHashMap<>(),"push",null);
+        else refresh(current);
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent); setIntent(intent); String route=routeFrom(intent);
+        if (incomingSharesEnabled()) captureIncomingShare(intent, null);
         if(!route.isEmpty()) { if(started) navigate(route); else pendingRoute=route; }
+    }
+    private void captureIncomingShare(Intent intent, Bundle state) {
+        if(intent==null)return;
+        if(state!=null && state.containsKey(IncomingShares.TOKEN))intent.putExtra(IncomingShares.TOKEN,state.getString(IncomingShares.TOKEN));
+        IncomingShares.capture(this,intent,outcome -> {
+            if(destroyed)return;
+            if("completed".equals(outcome.optString("status"))){
+                if(getIntent()==intent){intent.setAction(Intent.ACTION_MAIN);intent.removeExtra(Intent.EXTRA_STREAM);intent.removeExtra(Intent.EXTRA_TEXT);intent.setClipData(null);}
+                if(current!=null)current.status("Shared content received.");
+            }else if(current!=null)current.status("The shared content could not be received.");
+        });
     }
     private String routeFrom(Intent intent) {
         if(intent==null) return "";
         if(intent.getBooleanExtra("gofastr.reminder", false)) return localRoute(intent.getStringExtra("route"));
+        if(!Intent.ACTION_VIEW.equals(intent.getAction()))return "";
         android.net.Uri uri=intent.getData();
         if(uri==null || urlScheme().isEmpty() || !urlScheme().equals(uri.getScheme()) || uri.getFragment()!=null) return "";
         String route=(uri.getHost()==null?"":"/"+uri.getHost())+(uri.getEncodedPath()==null?"":uri.getEncodedPath());
@@ -154,8 +221,10 @@ public abstract class GofastrActivity extends Activity {
     private void open(String route,Map<String,String> values,String kind,Frame reuse) {
         if(navigationPending || destroyed) return;
         navigationPending=true; stopWatch();
+        int generation=privacyGeneration;
         JSONObject request=JSON.object("kind","open","connection",connection,"route",route,"revision",0,"values",new JSONObject(values));
         shortCall(request, reply -> {
+            if(generation!=privacyGeneration){if(reply.has("instance"))retire(reply.optString("instance"));return;}
             navigationPending=false;
             if(error(reply, current)) { if(current!=null) watch(current); return; }
             try {
@@ -187,6 +256,9 @@ public abstract class GofastrActivity extends Activity {
     }
     private void close(Frame frame) { frame.dispose(); if(!frame.instance.isEmpty()) retire(frame.instance); }
     private void show(Frame frame) {
+        if(frame.retired)return;
+        if(frame.screen.has("protection"))getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
         stopWatch();
         if(current!=null && current!=frame) { current.scrollY=current.scroll.getScrollY();current.rememberFocus();current.suspend();((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(current.scroll.getWindowToken(),0); }
         current=frame;
@@ -211,20 +283,26 @@ public abstract class GofastrActivity extends Activity {
     private void toolbar() {
         if(current==null) return;
         Frame f=current;LinearLayout bar=f.modal && f.modalBar!=null?f.modalBar:this.bar;bar.removeAllViews();if(!f.modal)tabs.removeAllViews();
-        if(stack().size()>1) bar.addView(button("Back","native.back",v->back()));
+        bar.setPadding(dp(8),dp(6),dp(12),dp(6));bar.setMinimumHeight(dp(64));bar.setBackgroundColor(background());
+        if(stack().size()>1) bar.addView(iconButton("Back","back","native.back",v->back()));
         JSONArray actions=JSON.array(f.screen,"actions");
-        for(int i=0;i<actions.length();i++) { JSONObject a=actions.optJSONObject(i); if(a.optBoolean("leading")) bar.addView(actionButton(f,a)); }
-        TextView title=text(f.screen.optString("title"),20); title.setTypeface(null,Typeface.BOLD); title.setSingleLine(true);
+        for(int i=0;i<actions.length();i++) { JSONObject a=actions.optJSONObject(i); if(a.optBoolean("leading")) bar.addView(actionButton(f,a,false)); }
+        TextView title=text(f.screen.optString("title"),18); title.setTypeface(null,Typeface.BOLD); title.setSingleLine(true);title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        if(f.screen.optBoolean("largeTitle")) {
+            title.setAlpha(f.scroll.getScrollY()>dp(70)?1:0);
+            title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            f.scroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->title.setAlpha(y>dp(70)?1:0));
+        }
         bar.addView(title,new LinearLayout.LayoutParams(0,-2,1));
         ArrayList<JSONObject> more=new ArrayList<>();
         boolean primary=false;String primaryID="";
         for(int i=0;i<actions.length();i++){JSONObject a=actions.optJSONObject(i);if(!a.optBoolean("leading") && (primaryID.isEmpty() || a.optBoolean("primary"))){primaryID=a.optString("id");if(a.optBoolean("primary"))break;}}
         for(int i=0;i<actions.length();i++) {
             JSONObject a=actions.optJSONObject(i); if(a.optBoolean("leading")) continue;
-            if(a.optString("id").equals(primaryID) && !primary) { bar.addView(actionButton(f,a)); primary=true; } else more.add(a);
+            if(a.optString("id").equals(primaryID) && !primary) { bar.addView(actionButton(f,a,true)); primary=true; } else more.add(a);
         }
         if(!more.isEmpty()) {
-            Button overflow=button("\u22ee","native.more",v->{
+            Button overflow=iconButton("More actions","more","native.more",v->{
                 PopupMenu menu=new PopupMenu(this,v);
                 for(int i=0;i<more.size();i++) { JSONObject a=more.get(i); menu.getMenu().add(0,i,0,a.optString("label")).setEnabled(!f.busy); }
                 menu.setOnMenuItemClickListener(item->{ action(f,more.get(item.getItemId()).optString("id"),null); return true; }); menu.show();
@@ -232,22 +310,46 @@ public abstract class GofastrActivity extends Activity {
         }
         JSONArray models=JSON.array(f.screen,"tabs");
         if(f.modal)return;
+        tabs.setVisibility(models.length()==0?View.GONE:View.VISIBLE);
+        tabs.setPadding(dp(12),dp(8),dp(12),dp(8));tabs.setBackgroundColor(appearance.surface());
         for(int i=0;i<models.length();i++) {
             JSONObject tab=models.optJSONObject(i);
             Button b=button(tab.optString("label"),"native.tab."+tab.optString("id"),v->switchTab(tab));
             b.setSelected(tab.optString("id").equals(activeTab)); b.setEnabled(!f.busy);
-            b.setTextColor(b.isSelected()?accent():muted());if(b.isSelected())b.setBackgroundColor(dark()?0xff29362d:0xffe8eee6);
+            int color=b.isSelected()?accent():muted();b.setTextColor(color);b.setTextSize(12);b.setMinHeight(dp(64));b.setGravity(Gravity.CENTER);
+            b.setCompoundDrawables(null,appearance.icon(tab.optString("icon"),color,23),null,null);b.setCompoundDrawablePadding(dp(5));
+            b.setBackground(appearance.ripple(b.isSelected()?(dark()?0xff433721:0xfff5e7cc):appearance.surface(),20,0));
             tabs.addView(b,new LinearLayout.LayoutParams(0,-2,1));
         }
     }
-    private Button actionButton(Frame f,JSONObject action) {
-        String icon=action.optString("icon"),label=action.optString("label");String display=icon.equals("compose")?"+":icon.equals("info")?"\u24d8":label;
-        Button b=button(display,"native.action."+action.optString("id"),v->action(f,action.optString("id"),null));b.setContentDescription(label);if(!display.equals(label))b.setTextSize(24);b.setEnabled(!f.busy && !f.uncertain);return b;
+    private Button actionButton(Frame f,JSONObject action,boolean primary) {
+        String icon=action.optString("icon"),label=action.optString("label");
+        Button b=icon.equals("info")?iconButton(label,icon,"native.action."+action.optString("id"),v->action(f,action.optString("id"),null)):button(label,"native.action."+action.optString("id"),v->action(f,action.optString("id"),null));
+        if(primary) {
+            appearance.apply(b,Appearance.Tone.PRIMARY);b.setPadding(dp(18),dp(8),dp(18),dp(8));
+            if(icon.equals("compose")){b.setCompoundDrawables(appearance.icon(icon,appearance.onAccent(),20),null,null,null);b.setCompoundDrawablePadding(dp(8));}
+        }
+        b.setContentDescription(label);b.setEnabled(!f.busy && !f.uncertain);return b;
     }
     private ArrayList<Frame> stack() { return stacks.computeIfAbsent(activeTab,k->new ArrayList<>()); }
     public void navigate(String route) {
         if(localRoute(route).isEmpty()) return;
-        guard(() -> open(route,new LinkedHashMap<>(),"push",null),true);
+        guard(() -> {
+            for(Map.Entry<String,ArrayList<Frame>> entry:stacks.entrySet()) {
+                ArrayList<Frame> frames=entry.getValue();
+                for(int index=0;index<frames.size();index++) {
+                    Frame target=frames.get(index);
+                    if(target.retired || !target.screen.optString("route").equals(route))continue;
+                    for(int above=index+1;above<frames.size();above++) {
+                        Frame pending=frames.get(above);
+                        if(pending.busy || pending.uncertain || pending.settling){current.status("Finish the current action before leaving.");return;}
+                    }
+                    while(frames.size()>index+1)close(frames.remove(frames.size()-1));
+                    activeTab=entry.getKey();show(target);refresh(target);return;
+                }
+            }
+            open(route,new LinkedHashMap<>(),"push",null);
+        },true);
     }
     private void switchTab(JSONObject tab) {
         if(tab.optString("id").equals(activeTab)) return;
@@ -282,7 +384,13 @@ public abstract class GofastrActivity extends Activity {
             if(forward && editor.optBoolean("draftStored") && !editor.optBoolean("pending") && !editor.optBoolean("unknown")){continuation.run();return;}
             if(editor.optBoolean("pending") || editor.optBoolean("unknown")) { f.status("The save outcome is not confirmed. Check the saved notes before leaving."); return; }
             JSONObject draft=f.screen.optJSONObject("form").optJSONObject("draft");
-            if(draft==null) { f.status("Save your changes before leaving."); return; }
+            if(draft==null) {
+                if(f.screen.has("protection"))new AlertDialog.Builder(this).setTitle("Discard unsaved protected text?")
+                    .setMessage("Protected drafts stay in memory and are cleared when the app goes to the background.")
+                    .setNegativeButton("Keep editing",(d,w)->{}).setPositiveButton("Discard changes",(d,w)->leave(f,"discard",continuation)).show();
+                else f.status("Save your changes before leaving.");
+                return;
+            }
             new AlertDialog.Builder(this).setTitle(draft.optString("title")).setMessage(draft.optString("message"))
                 .setNegativeButton(draft.optString("keepEditing"),(d,w)->{})
                 .setNeutralButton(draft.optString("discard"),(d,w)->leave(f,"discard",continuation))
@@ -296,7 +404,7 @@ public abstract class GofastrActivity extends Activity {
         shortCall(request,reply->{f.settling=false;if(error(reply,f))return; f.adoptEditor(reply,revision); if(f.revision!=revision){f.status("Your text changed. Choose Back again to review the draft.");checkpoint(f,null);return;}if(reply.optJSONObject("editor")==null || reply.optJSONObject("editor").optBoolean("canLeave")) continuation.run(); });
     }
     private void checkpoint(Frame f,Consumer<JSONObject> done) {
-        if(f==null || f.instance.isEmpty() || destroyed) return;
+        if(f==null || f.retired || f.instance.isEmpty() || destroyed) return;
         if(f.settling) { f.checkpointDeferred=true; if(done!=null) f.status("Wait for the current action to finish."); return; }
         main.removeCallbacks(f.checkpointTask);
         long revision=f.revision; JSONObject request=request(f,"checkpoint");
@@ -317,7 +425,7 @@ public abstract class GofastrActivity extends Activity {
         mutate(f,"action",extras,extra,null,null);
     }
     private void mutate(Frame f,String kind,JSONObject extras,Map<String,String> extra,Runnable accepted,Runnable rejected) {
-        if(f.busy || destroyed)return;
+        if(f.busy || f.retired || destroyed)return;
         f.busy=true; stopWatch(); toolbar(); main.removeCallbacks(f.checkpointTask);
         String id=UUID.randomUUID().toString(); JSONObject req=request(f,kind); put(req,"requestId",id);
         if(extra!=null) { JSONObject values=req.optJSONObject("values"); for(Map.Entry<String,String> e:extra.entrySet())put(values,e.getKey(),e.getValue()); }
@@ -327,7 +435,7 @@ public abstract class GofastrActivity extends Activity {
             try { reply=command(req); } catch(Exception e) { reply=JSON.object("error",JSON.object("code","unknown","message","The operation outcome is unknown. It was not retried.")); }
             final JSONObject result=reply;
             main.post(() -> {
-                if(destroyed)return;
+                if(destroyed || f.retired)return;
                 if(!result.has("response")) {
                     JSONObject unknown=result.optJSONObject("error");
                     if(unknown!=null && unknown.optString("code").equals("validation") && (kind.equals("service-result") || kind.equals("file-result"))){
@@ -348,6 +456,7 @@ public abstract class GofastrActivity extends Activity {
                 f.settling=true;
                 JSONObject complete=request(f,"complete"); put(complete,"requestId",id); long revision=f.revision;
                 shortCall(complete,settled->{
+                    if(f.retired)return;
                     f.busy=false;f.settling=false; f.adoptEditor(settled,revision); toolbar();
                     if(error(settled,f)) { JSONObject err=settled.optJSONObject("error");if(err!=null && (err.optString("code").equals("transport") || err.optString("code").equals("unknown")))f.uncertain=true;if(rejected!=null)rejected.run();toolbar();return; }
                     JSONObject response=settled.optJSONObject("response");
@@ -366,6 +475,7 @@ public abstract class GofastrActivity extends Activity {
         f.checkpointDeferred=true;
     }
     private void apply(Frame f,JSONObject response,JSONObject reply) {
+        if(f.retired)return;
         if(!foreground){f.deferredResponse=response;f.deferredReply=reply;return;}
         JSONObject saved=response.optJSONObject("saved");
         if(saved!=null)put(f.screen,"route",saved.optString("route"));
@@ -387,6 +497,7 @@ public abstract class GofastrActivity extends Activity {
         if(response.has("presentation")) present(f,response.optJSONObject("presentation"),reply.optString("presentationId"));
         if(response.has("files")) services.files(response.optJSONObject("files"),result -> mutate(f,"file-result",JSON.object("fileId",reply.optString("fileId"),"fileResult",result),null,null,null));
         if(response.has("service")) services.run(response.optJSONObject("service"),result -> mutate(f,"service-result",JSON.object("serviceId",reply.optString("serviceId"),"serviceResult",result),null,null,null));
+        if(nav==null && !f.screen.has("form") && !response.has("presentation") && !response.has("files") && !response.has("service"))refresh(f);
     }
     private void ack(Frame f,String id,String capability,String status) {
         if(id==null || id.isEmpty())return;
@@ -463,12 +574,13 @@ public abstract class GofastrActivity extends Activity {
     final class Frame {
         String instance="",dataVersion=""; JSONObject screen,editor,lastError,deferredResponse,deferredReply;
         Map<String,String> values=new LinkedHashMap<>(); long revision; int scrollY;
-        boolean busy,settling,checkpointDeferred,uncertain,watching,recovered,updating,modal;
+        boolean busy,settling,checkpointDeferred,uncertain,watching,recovered,updating,modal,selectionMode,retired;
         Dialog routeDialog;LinearLayout modalBar;
         ScrollView scroll; LinearLayout content,rows,media,detailsPanel; TextView status;Button detailsToggle;
         final Map<String,View> controls=new LinkedHashMap<>();
         final Map<String,ComponentSlot> components=new LinkedHashMap<>();
         MediaContent legacy;
+        SwipeRow revealedRow;
         View retainedFocus;int caretStart,caretEnd;boolean retainedKeyboard;
         final Runnable checkpointTask=()->checkpoint(this,null);
         Runnable searchTask;
@@ -477,32 +589,39 @@ public abstract class GofastrActivity extends Activity {
         void status(String message) { if(status!=null){status.setText(message); status.setVisibility(message.isEmpty()?View.GONE:View.VISIBLE);} }
         void build() {
             scroll=new ScrollView(GofastrActivity.this); scroll.setFillViewport(true); identify(scroll,"native.screen");
-            content=column();content.setPadding(dp(18),dp(12),dp(18),dp(20)); scroll.addView(content);
-            if(screen.optBoolean("largeTitle")){TextView heading=text(screen.optString("title"),32);heading.setTypeface(null,Typeface.BOLD);content.addView(heading);}
-            if(!screen.optString("prompt").isEmpty())content.addView(text(screen.optString("prompt"),16));
-            status=text("",14);identify(status,"native.status");status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);content.addView(status);
+            content=column();content.setPadding(dp(20),dp(12),dp(20),dp(28)); scroll.addView(content);
+            if(screen.optBoolean("largeTitle")){TextView heading=text(screen.optString("title"),34);appearance.typography(heading,Appearance.Tone.HEADING);heading.setPadding(0,0,0,dp(4));if(android.os.Build.VERSION.SDK_INT>=28)heading.setAccessibilityHeading(true);content.addView(heading);}
+            if(!screen.optString("prompt").isEmpty()){TextView prompt=text(screen.optString("prompt"),14);appearance.typography(prompt,Appearance.Tone.SECONDARY);prompt.setPadding(0,0,0,dp(20));content.addView(prompt);}
+            status=text("",13);appearance.typography(status,Appearance.Tone.SECONDARY);identify(status,"native.status");status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);content.addView(status);status("");
             JSONObject form=screen.optJSONObject("form"),list=screen.optJSONObject("list");
             if(form!=null) {
                 status(form.optString("status"));
                 JSONArray fields=JSON.array(form,"fields");
-                LinearLayout details=column();
+                LinearLayout details=column();details.setPadding(dp(16),dp(8),dp(16),dp(16));appearance.apply(details,Appearance.Tone.SURFACE);
                 for(int i=0;i<fields.length();i++){JSONObject field=fields.optJSONObject(i); addField(field,field.optString("style").equals("detail")?details:content,false);}
                 if(details.getChildCount()>0) {
-                    detailsToggle=button(form.optString("detailsTitle","Details"),"native.details",v->details.setVisibility(details.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));detailsPanel=details;details.setVisibility(View.GONE);
+                    String detailsTitle=form.optString("detailsTitle","Details");
+                    detailsToggle=button(detailsTitle,"native.details",v->{details.setVisibility(details.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);disclosure(detailsToggle,detailsTitle,details.getVisibility()==View.VISIBLE);});
+                    appearance.apply(detailsToggle,Appearance.Tone.OUTLINE);detailsToggle.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);disclosure(detailsToggle,detailsTitle,false);detailsPanel=details;details.setVisibility(View.GONE);
                 }
             }
             if(list!=null) {
                 String search=list.optString("searchKey");
                 if(!search.isEmpty()) {
-                    EditText input=new EditText(GofastrActivity.this);input.setSingleLine(true);input.setTextColor(ink());input.setHint(list.optString("searchPlaceholder","Search"));input.setText(values.getOrDefault(search,""));identify(input,"native.search"); controls.put(search,input);content.addView(input);
+                    EditText input=new EditText(GofastrActivity.this);input.setSingleLine(true);input.setTextSize(16);input.setHint(list.optString("searchPlaceholder","Search"));input.setText(values.getOrDefault(search,""));input.setContentDescription(list.optString("searchPlaceholder","Search"));identify(input,"native.search");
+                    appearance.apply(input,Appearance.Tone.SEARCH);input.setPadding(dp(16),dp(14),dp(16),dp(14));input.setCompoundDrawables(appearance.icon("search",muted(),20),null,null,null);input.setCompoundDrawablePadding(dp(10));
+                    controls.put(search,input);content.addView(input,new LinearLayout.LayoutParams(-1,-2));
                     input.addTextChangedListener(watcher(value->{ if(updating)return;values.put(search,value);revision++;scheduleRefresh(); }));
                 }
                 JSONArray filters=JSON.array(list,"filters");LinearLayout filterControls=column();for(int i=0;i<filters.length();i++)addField(filters.optJSONObject(i),filterControls,true);
-                LinearLayout tools=row();if(filters.length()>0)tools.addView(button("Filter and sort","native.filters",v->filterControls.setVisibility(filterControls.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE)),new LinearLayout.LayoutParams(0,-2,1));
+                LinearLayout tools=row();tools.setPadding(0,dp(8),0,dp(8));
+                if(filters.length()>0){Button filtersButton=button("Filters","native.filters",v->{filterControls.setVisibility(filterControls.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);disclosure((Button)v,"Filters",filterControls.getVisibility()==View.VISIBLE);});disclosure(filtersButton,"Filters",false);tools.addView(filtersButton);}
+                tools.addView(new View(GofastrActivity.this),new LinearLayout.LayoutParams(0,1,1));
+                if(list.has("selection"))tools.addView(button("Select","native.select",v->{selectionMode=!selectionMode;((Button)v).setText(selectionMode?"Done":"Select");if(!selectionMode){values.put(list.optJSONObject("selection").optString("key"),"[]");revision++;}update();}));
                 if(list.optBoolean("refreshable"))tools.addView(button("Refresh","native.refresh",v->{recovered=false;refresh(this);}));content.addView(tools);
-                filterControls.setVisibility(View.GONE);content.addView(filterControls);
+                filterControls.setPadding(dp(16),dp(8),dp(16),dp(12));appearance.apply(filterControls,Appearance.Tone.SURFACE);filterControls.setVisibility(View.GONE);content.addView(filterControls);
             }
-            rows=column();content.addView(rows); media=column();content.addView(media);if(detailsPanel!=null){content.addView(detailsToggle);content.addView(detailsPanel);}update();
+            rows=column();content.addView(rows); media=column();content.addView(media);if(detailsPanel!=null){LinearLayout.LayoutParams layout=new LinearLayout.LayoutParams(-1,-2);layout.topMargin=dp(20);content.addView(detailsToggle,layout);content.addView(detailsPanel);}update();
         }
         void scheduleRefresh() {
             if(searchTask!=null)main.removeCallbacks(searchTask);
@@ -516,15 +635,15 @@ public abstract class GofastrActivity extends Activity {
             String key=field.optString("key"),kind=field.optString("kind"),value=values.getOrDefault(key,field.optString("value"));values.put(key,value);
             String label=field.optString("label"); boolean disabled=field.optBoolean("disabled"); View control;
             if(kind.equals("toggle")) {
-                Switch toggle=new Switch(GofastrActivity.this);toggle.setText(label);toggle.setTextColor(ink());toggle.setChecked(value.equals("true"));toggle.setOnCheckedChangeListener((v,checked)->changed(key,Boolean.toString(checked),filter));control=toggle;target.addView(control);
+                Switch toggle=new Switch(GofastrActivity.this);toggle.setText(label);appearance.apply(toggle,Appearance.Tone.BODY);toggle.setTextSize(15);toggle.setMinHeight(dp(52));toggle.setChecked(value.equals("true"));toggle.setOnCheckedChangeListener((v,checked)->changed(key,Boolean.toString(checked),filter));control=toggle;target.addView(control,new LinearLayout.LayoutParams(-1,-2));
             } else if(kind.equals("select")) {
-                target.addView(text(label,14));Button select=button(optionLabel(field,value),"native.field."+key,v->{
+                target.addView(sectionLabel(label));Button select=button(optionLabel(field,value),"native.field."+key,v->{
                     JSONArray opts=JSON.array(field,"options"); List<String> labels=new ArrayList<>();List<String> vals=new ArrayList<>();
                     for(int i=0;i<opts.length();i++){JSONObject opt=opts.optJSONObject(i);if(!opt.optBoolean("disabled")){labels.add(opt.optString("label"));vals.add(opt.optString("value"));}}
                     new AlertDialog.Builder(GofastrActivity.this).setTitle(label).setItems(labels.toArray(new String[0]),(d,which)->{((Button)v).setText(labels.get(which));changed(key,vals.get(which),filter);}).show();
-                });control=select;target.addView(control);
+                });appearance.apply(select,Appearance.Tone.OUTLINE);select.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);control=select;target.addView(control,new LinearLayout.LayoutParams(-1,-2));
             } else if(kind.equals("date") || kind.equals("time")) {
-                target.addView(text(label,14));Button date=button(value.isEmpty()?field.optString("placeholder","Choose"):value,"native.field."+key,v->{
+                target.addView(sectionLabel(label));Button date=button(value.isEmpty()?field.optString("placeholder","Choose"):value,"native.field."+key,v->{
                     Calendar now=Calendar.getInstance();String current=values.getOrDefault(key,"");
                     Consumer<String> set=next->{((Button)v).setText(next.isEmpty()?"Choose":next);changed(key,next,filter);};
                     if(kind.equals("date")) {
@@ -534,18 +653,30 @@ public abstract class GofastrActivity extends Activity {
                         int h=now.get(Calendar.HOUR_OF_DAY),m=now.get(Calendar.MINUTE);try{String[] parts=current.split(":");h=Integer.parseInt(parts[0]);m=Integer.parseInt(parts[1]);}catch(Exception ignored){}
                         TimePickerDialog picker=new TimePickerDialog(GofastrActivity.this,(view,hour,minute)->set.accept(String.format(Locale.ROOT,"%02d:%02d",hour,minute)),h,m,true);picker.setButton(AlertDialog.BUTTON_NEUTRAL,"Clear",(dialog,which)->set.accept(""));picker.show();
                     }
-                });control=date;target.addView(control);
+                });appearance.apply(date,Appearance.Tone.OUTLINE);date.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);control=date;target.addView(control,new LinearLayout.LayoutParams(-1,-2));
             }else {
                 boolean multiline=kind.equals("multiline");
-                if(!multiline && !field.optString("style").equals("body") && !field.optString("style").equals("title"))target.addView(text(label,14));
+                if(!multiline && !field.optString("style").equals("body") && !field.optString("style").equals("title"))target.addView(sectionLabel(label));
                 EditText input=new EditText(GofastrActivity.this); input.setTextColor(ink());input.setHintTextColor(muted());input.setTextSize(field.optString("style").equals("title")?28:18);
                 input.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES|(multiline?InputType.TYPE_TEXT_FLAG_MULTI_LINE:0));input.setSingleLine(!multiline);input.setGravity(Gravity.TOP|Gravity.START);if(multiline)input.setMinLines(10);
+                if(screen.has("protection")) {
+                    input.setInputType(input.getInputType()|InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+                    input.setSaveEnabled(false);
+                    if(android.os.Build.VERSION.SDK_INT>=26) {
+                        input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+                        input.setImeOptions(input.getImeOptions()|android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+                    }
+                }
                 input.setHint(field.optString("placeholder",label));input.setText(value);input.setContentDescription(label);input.addTextChangedListener(watcher(next->changed(key,next,filter)));control=input;target.addView(control,new LinearLayout.LayoutParams(-1,-2));
-                if(multiline || field.optString("style").equals("title"))input.setBackgroundColor(Color.TRANSPARENT);
+                if(multiline || field.optString("style").equals("title")) {
+                    appearance.typography(input,field.optString("style").equals("title")?Appearance.Tone.DOCUMENT_TITLE:Appearance.Tone.DOCUMENT_BODY);
+                    input.setBackgroundColor(Color.TRANSPARENT);input.setPadding(0,dp(10),0,dp(14));
+                }else {appearance.apply(input,Appearance.Tone.INPUT);input.setTextSize(16);input.setPadding(dp(12),dp(14),dp(12),dp(14));}
             }
             control.setEnabled(!disabled);identify(control,"native.field."+key);controls.put(key,control);
         }
         void adoptEditor(JSONObject reply,long sentRevision) {
+            if(retired)return;
             JSONObject state=reply.optJSONObject("editor");if(state==null || sentRevision!=revision)return;
             editor=state;
             if(!state.optString("message").isEmpty())status(state.optString("message"));
@@ -562,31 +693,65 @@ public abstract class GofastrActivity extends Activity {
             }
         }
         void update() {
+            revealedRow=null;
             rows.removeAllViews();JSONObject list=screen.optJSONObject("list");
             if(list!=null) {
-                if(!list.optString("header").isEmpty())rows.addView(text(list.optString("header"),16));
+                if(!list.optString("header").isEmpty()){TextView header=sectionLabel(list.optString("header"));header.setPadding(dp(4),dp(12),dp(4),dp(12));rows.addView(header);}
                 JSONArray items=JSON.array(list,"rows"); JSONObject selection=list.optJSONObject("selection");LinkedHashSet<String> selected=new LinkedHashSet<>();
-                if(selection!=null){JSONArray ids=JSON.array(selection,"selected");for(int i=0;i<ids.length();i++)selected.add(ids.optString(i));}
-                if(items.length()==0)rows.addView(text(list.optString("empty"),18));
+                if(selection!=null){JSONArray ids=JSON.array(selection,"selected");try{String saved=values.get(selection.optString("key"));if(saved!=null)ids=new JSONArray(saved);}catch(Exception ignored){}for(int i=0;i<ids.length();i++)selected.add(ids.optString(i));}
+                if(items.length()==0 && !list.optString("empty").isEmpty()) {
+                    LinearLayout empty=column();appearance.apply(empty,Appearance.Tone.SURFACE);empty.setGravity(Gravity.CENTER);empty.setPadding(dp(24),dp(36),dp(24),dp(36));
+                    TextView symbol=text("",24);symbol.setCompoundDrawables(null,appearance.icon("notes",accent(),32),null,null);symbol.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);empty.addView(symbol);
+                    String[] message=list.optString("empty").split("\n",2);TextView heading=text(message[0],18);heading.setTypeface(null,Typeface.BOLD);heading.setGravity(Gravity.CENTER);empty.addView(heading);
+                    if(message.length>1){TextView hint=text(message[1],14);appearance.apply(hint,Appearance.Tone.SECONDARY);hint.setGravity(Gravity.CENTER);empty.addView(hint);}
+                    rows.addView(empty,new LinearLayout.LayoutParams(-1,-2));
+                }
                 for(int i=0;i<items.length();i++) {
-                    JSONObject item=items.optJSONObject(i);String id=item.optString("id");LinearLayout line=row();line.setMinimumHeight(dp(72));
-                    if(selection!=null) {
-                        CheckBox check=new CheckBox(GofastrActivity.this);check.setChecked(selected.contains(id));check.setEnabled(!item.optBoolean("disabled"));check.setContentDescription("Select "+item.optString("title"));identify(check,"native.selection."+id);
+                    JSONObject item=items.optJSONObject(i);String id=item.optString("id");LinearLayout line=row();line.setMinimumHeight(dp(80));line.setPadding(dp(12),dp(4),dp(4),dp(4));appearance.apply(line,Appearance.Tone.SURFACE);
+                    if(selection!=null && (selectionMode || !selected.isEmpty())) {
+                        CheckBox check=new CheckBox(GofastrActivity.this);appearance.apply(check,Appearance.Tone.BODY);check.setChecked(selected.contains(id));check.setEnabled(!item.optBoolean("disabled"));check.setContentDescription("Select "+item.optString("title"));identify(check,"native.selection."+id);
                         check.setOnCheckedChangeListener((v,checked)->{ if(checked)selected.add(id);else selected.remove(id);values.put(selection.optString("key"),new JSONArray(selected).toString());revision++; });line.addView(check);
                     }
-                    LinearLayout labels=column();TextView title=text(item.optString("title"),18);title.setTypeface(null,Typeface.BOLD);labels.addView(title);
-                    if(!item.optString("subtitle").isEmpty())labels.addView(text(item.optString("subtitle"),16));
-                    if(!item.optString("metadata").isEmpty()){TextView metadata=text(item.optString("metadata"),13);metadata.setTextColor(muted());labels.addView(metadata);}
+                    if(!item.optString("icon").isEmpty()){TextView icon=text("",18);icon.setCompoundDrawables(appearance.icon(item.optString("icon"),accent(),24),null,null,null);icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);icon.setPadding(0,0,dp(12),0);line.addView(icon);}
+                    LinearLayout labels=column();TextView title=text(item.optString("title"),17);title.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));title.setPadding(dp(4),dp(4),dp(4),dp(3));labels.addView(title);
+                    if(!item.optString("subtitle").isEmpty()){TextView subtitle=text(item.optString("subtitle"),14);appearance.apply(subtitle,Appearance.Tone.SECONDARY);subtitle.setMaxLines(2);subtitle.setEllipsize(android.text.TextUtils.TruncateAt.END);subtitle.setPadding(dp(4),dp(2),dp(4),dp(2));labels.addView(subtitle);}
+                    if(!item.optString("metadata").isEmpty()){TextView metadata=text(item.optString("metadata"),12);appearance.apply(metadata,Appearance.Tone.SECONDARY);metadata.setPadding(dp(4),dp(5),dp(4),dp(2));labels.addView(metadata);}
                     labels.setPadding(dp(4),dp(8),dp(4),dp(10));labels.setEnabled(!item.optBoolean("disabled"));identify(labels,"native.row."+id);labels.setOnClickListener(v->{if(!item.optBoolean("disabled"))navigate(item.optString("destination"));});line.addView(labels,new LinearLayout.LayoutParams(0,-2,1));
                     JSONArray trailing=JSON.array(item,"trailingActions"),leading=JSON.array(item,"leadingActions");
+                    View rowView=line;
                     if(trailing.length()+leading.length()>0) {
-                        ArrayList<JSONObject> acts=new ArrayList<>();for(int j=0;j<leading.length();j++)acts.add(leading.optJSONObject(j));for(int j=0;j<trailing.length();j++)acts.add(trailing.optJSONObject(j));
-                        Button more=button("Actions","native.row.actions."+id,v->{PopupMenu menu=new PopupMenu(GofastrActivity.this,v);for(int j=0;j<acts.size();j++)menu.getMenu().add(0,j,0,acts.get(j).optString("label"));menu.setOnMenuItemClickListener(entry->{action(this,acts.get(entry.getItemId()).optString("id"),Collections.singletonMap("row",id));return true;});menu.show();});more.setEnabled(!item.optBoolean("disabled"));line.addView(more);
-                        GestureDetector gestures=new GestureDetector(GofastrActivity.this,new GestureDetector.SimpleOnGestureListener(){@Override public boolean onFling(MotionEvent start,MotionEvent end,float vx,float vy){if(start==null || end==null || item.optBoolean("disabled") || Math.abs(end.getX()-start.getX())<dp(72) || Math.abs(vx)<Math.abs(vy))return false;JSONArray side=end.getX()>start.getX()?leading:trailing;if(side.length()==0)return false;JSONObject first=side.optJSONObject(0);if(first.optBoolean("fullSwipe") && !first.optString("role").equals("destructive"))action(Frame.this,first.optString("id"),Collections.singletonMap("row",id));else more.performClick();return true;}});labels.setOnTouchListener((v,event)->gestures.onTouchEvent(event));
+                        SwipeRow swipe=new SwipeRow(GofastrActivity.this,line,id,leading,trailing,
+                                ()->this==current && !busy && !uncertain && !selectionMode && !item.optBoolean("disabled"),
+                                selectedAction->action(this,selectedAction.optString("id"),Collections.singletonMap("row",id)),
+                                opened->{
+                                    if(revealedRow!=null && revealedRow!=opened)revealedRow.close();
+                                    revealedRow=opened;
+                                });
+                        ArrayList<JSONObject> menuActions=new ArrayList<>();
+                        for(int j=0;j<leading.length();j++)menuActions.add(leading.optJSONObject(j));
+                        for(int j=0;j<trailing.length();j++)menuActions.add(trailing.optJSONObject(j));
+                        Button more=iconButton("Actions for "+item.optString("title"),"more",
+                                "native.row.actions."+id,v->{
+                                    swipe.close();
+                                    PopupMenu menu=new PopupMenu(GofastrActivity.this,v);
+                                    for(int j=0;j<menuActions.size();j++)
+                                        menu.getMenu().add(0,j,0,menuActions.get(j).optString("label"));
+                                    menu.setOnMenuItemClickListener(entry->{
+                                        if(this==current && !item.optBoolean("disabled"))
+                                            action(this,menuActions.get(entry.getItemId()).optString("id"),Collections.singletonMap("row",id));
+                                        return true;
+                                    });
+                                    menu.show();
+                                });
+                        more.setEnabled(!item.optBoolean("disabled") && !selectionMode);
+                        line.addView(more);
+                        rowView=swipe;
+                    } else {
+                        TextView chevron=text("",16);chevron.setCompoundDrawables(appearance.icon("chevron",muted(),18),null,null,null);chevron.setPadding(dp(8),0,dp(12),0);chevron.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);line.addView(chevron);
                     }
-                    rows.addView(line);View divider=new View(GofastrActivity.this);divider.setBackgroundColor(dark()?0xff383838:0xffe4e0d9);rows.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
+                    LinearLayout.LayoutParams layout=new LinearLayout.LayoutParams(-1,-2);layout.bottomMargin=dp(8);rows.addView(rowView,layout);
                 }
-                if(!list.optString("footer").isEmpty())rows.addView(text(list.optString("footer"),14));
+                if(!list.optString("footer").isEmpty()){TextView footer=text(list.optString("footer"),12);appearance.apply(footer,Appearance.Tone.SECONDARY);footer.setPadding(dp(4),dp(16),dp(4),dp(8));rows.addView(footer);}
                 JSONObject paging=list.optJSONObject("paging");if(paging!=null && !paging.optString("next").isEmpty())rows.addView(button(paging.optString("label"),"native.paging",v->{values.put(paging.optString("key"),paging.optString("next"));revision++;refresh(this);}));
             }
             if(!screen.optString("text").isEmpty()) {TextView body=text(screen.optString("text"),18);body.setTextIsSelectable(true);rows.addView(body);}
@@ -616,7 +781,7 @@ public abstract class GofastrActivity extends Activity {
             Iterator<Map.Entry<String,ComponentSlot>> iterator=components.entrySet().iterator();
             while(iterator.hasNext()){Map.Entry<String,ComponentSlot> e=iterator.next();if(!retained.contains(e.getKey())){e.getValue().component.dispose();media.removeView(e.getValue().component.view());iterator.remove();}}
         }
-        void suspend() { if(legacy!=null)legacy.suspend();for(ComponentSlot s:components.values())s.component.suspend(); }
+        void suspend() { if(revealedRow!=null)revealedRow.close();if(legacy!=null)legacy.suspend();for(ComponentSlot s:components.values())s.component.suspend(); }
         void dispose() { main.removeCallbacks(checkpointTask);if(searchTask!=null)main.removeCallbacks(searchTask);if(routeDialog!=null){routeDialog.dismiss();routeDialog=null;}if(legacy!=null)legacy.dispose();for(ComponentSlot s:components.values())s.component.dispose();components.clear(); }
     }
     private static class ComponentSlot { final String name;final Extensions.Component component;ComponentSlot(String name,Extensions.Component component){this.name=name;this.component=component;} }
@@ -626,12 +791,15 @@ public abstract class GofastrActivity extends Activity {
     public boolean dark(){return (getResources().getConfiguration().uiMode&Configuration.UI_MODE_NIGHT_MASK)==Configuration.UI_MODE_NIGHT_YES;}
     public int ink(){return dark()?0xffeeeae3:0xff24231f;}
     public int muted(){return dark()?0xffb8b4ac:0xff69665f;}
-    public int background(){return dark()?0xff191a18:0xfffaf9f6;}
-    public int accent(){return dark()?0xffacc8ab:0xff396047;}
+    public int background(){return dark()?0xff1b1a17:0xfff7f5ef;}
+    public int accent(){return dark()?0xffffcc68:0xff925500;}
     public LinearLayout column(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.VERTICAL);return v;}
     public LinearLayout row(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.HORIZONTAL);v.setGravity(Gravity.CENTER_VERTICAL);return v;}
-    public TextView text(String text,int size){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);v.setTextColor(ink());v.setPadding(dp(4),dp(6),dp(4),dp(6));return v;}
-    public Button button(String label,String id,View.OnClickListener listener){Button b=new Button(this,null,android.R.attr.borderlessButtonStyle);b.setText(label);b.setAllCaps(false);b.setTextSize(14);b.setMinWidth(0);b.setMinimumWidth(0);b.setPadding(dp(12),dp(8),dp(12),dp(8));b.setMinHeight(dp(48));b.setTextColor(accent());b.setOnClickListener(listener);identify(b,id);return b;}
+    public TextView text(String text,int size){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);appearance.typography(v,Appearance.Tone.BODY);v.setPadding(dp(4),dp(6),dp(4),dp(6));return v;}
+    public Button button(String label,String id,View.OnClickListener listener){Button b=new Button(this,null,android.R.attr.borderlessButtonStyle);b.setText(label);b.setAllCaps(false);b.setTextSize(14);b.setMinWidth(0);b.setMinimumWidth(0);b.setPadding(dp(12),dp(8),dp(12),dp(8));b.setMinHeight(dp(48));appearance.apply(b,Appearance.Tone.ACTION);b.setOnClickListener(listener);identify(b,id);return b;}
+    Button iconButton(String label,String icon,String id,View.OnClickListener listener){Button b=button("",id,listener);b.setContentDescription(label);b.setCompoundDrawables(appearance.icon(icon,accent(),24),null,null,null);b.setPadding(dp(12),dp(12),dp(12),dp(12));return b;}
+    TextView sectionLabel(String label){TextView v=text(label,13);appearance.typography(v,Appearance.Tone.SECTION);v.setPadding(dp(4),dp(16),dp(4),dp(8));return v;}
+    void disclosure(Button button,String label,boolean expanded){button.setCompoundDrawables(null,null,appearance.icon(expanded?"down":"chevron",muted(),16),null);button.setCompoundDrawablePadding(dp(8));button.setContentDescription(label+", "+(expanded?"expanded":"collapsed"));}
     public static void identify(View view,String id){ view.setTag(id); view.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View host,AccessibilityNodeInfo info){super.onInitializeAccessibilityNodeInfo(host,info);info.setViewIdResourceName(id);}}); }
     public boolean canUseCamera(){return cameraEnabled();}
     public boolean canUseMicrophone(){return microphoneEnabled();}

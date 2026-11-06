@@ -23,6 +23,9 @@ under the selected output directory. Run installs only the selected app package.
 
 - Native lists, search, collapsed filters, refresh, accumulated paging,
   stable-ID selection, row action menus, and declared swipe actions.
+  Horizontal drags reveal action rails and follow the pointer. Full swipe runs
+  only a declared non-destructive action; destructive actions require a button.
+  One row stays open at a time, with the action menu available as a fallback.
 - Native editors keep their controls while saves, presentations, and media
   updates complete. Text, IME, and focus stay local. Go owns validation, drafts,
   save outcomes, and departure policy. Background snapshots persist through Go.
@@ -68,6 +71,12 @@ bindings, configuration, and the compiled factory catalog. Accessibility IDs use
 the same `native.field.*`, `native.action.*`, `native.row.*`, and `native.tab.*`
 names as the UIKit renderer. Normal font scaling and light/dark configuration
 apply to the controls.
+
+The Android appearance library gives lists, documents, file cards, toolbar
+actions, and tabs a shared light/dark palette, typography, spacing, and icons.
+External links reuse a matching retained screen instead of opening another
+editor for the same note. See [Notes device features](notes-device-features.md)
+for reviewed imports, selected-note widgets, and protected text notes.
 
 Android native is a negotiated `android` renderer. A required extension without
 an Android adapter fails packaging. Optional manifest `android` metadata supplies

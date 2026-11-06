@@ -4,6 +4,8 @@ package notesstore
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -174,6 +176,47 @@ func (store *Store) SaveDetails(ctx context.Context, id, title, body string, det
 // SaveMetadata changes no text fields and never deletes attachments.
 func (store *Store) SaveMetadata(ctx context.Context, id string, details notes.Details) (notes.Note, error) {
 	return store.write(ctx, id, detailValues(details))
+}
+
+// ImportShared keeps the deduplication receipt and text in one database write.
+func (store *Store) ImportShared(ctx context.Context, source, title, body string) (notes.Note, bool, error) {
+	owner, err := store.Owner(ctx)
+	if err != nil {
+		return notes.Note{}, false, err
+	}
+	digest := sha256.Sum256([]byte("notes.shared.v1\x00" + owner + "\x00" + source))
+	identifier := hex.EncodeToString(digest[:])
+	find := func() (notes.Note, bool, bool, error) {
+		rows, err := store.handler.ListAll(ctx, crud.ListOptions{Limit: 1, Filters: []filter.ParsedFilter{
+			{Field: "source_id", Op: filter.OpEq, Value: identifier},
+		}})
+		if err != nil || len(rows) == 0 {
+			return notes.Note{}, false, false, err
+		}
+		note, err := decode(rows[0])
+		complete := boolean(rows[0]["source_complete"]) || boolean(rows[0]["sourceComplete"])
+		return note, complete, true, err
+	}
+	if note, complete, found, err := find(); err != nil || found {
+		return note, complete, err
+	}
+	row, err := store.handler.CreateOne(crud.WithServerWrites(ctx), map[string]any{
+		"source_id": identifier, "title": title, "body": body,
+	})
+	if err != nil {
+		// A concurrent importer may have won the unique source receipt.
+		if note, complete, found, lookupErr := find(); lookupErr == nil && found {
+			return note, complete, nil
+		}
+		return notes.Note{}, false, err
+	}
+	note, err := decode(row)
+	return note, false, err
+}
+
+func (store *Store) FinishImport(ctx context.Context, id string) error {
+	_, err := store.handler.UpdateOne(crud.WithServerWrites(ctx), id, map[string]any{"source_complete": true})
+	return err
 }
 
 func detailValues(details notes.Details) map[string]any {

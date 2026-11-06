@@ -188,6 +188,9 @@ func (runtime *Runtime) fileResult(ctx context.Context, session *runtimeSession,
 	}
 	session.mu.Lock()
 	session.active, record.finished, record.response = false, true, result
+	if runtime.finishRevoked(session, &reply) {
+		return reply
+	}
 	if err != nil {
 		record.failure = safeFailure(err)
 		if definition.Commit && record.failure.Code == "internal" {
