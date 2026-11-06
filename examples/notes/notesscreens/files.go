@@ -126,7 +126,11 @@ func fileRoutes(service *notes.Service, store *files.Store) []nativeui.Route {
 			attachments = append(attachments, nativeui.Attachment{ID: request.Params["handle"], Name: document.Name, MediaType: document.MediaType, Size: len(document.Data), Destination: attachmentRoute(request.Params["id"], request.Params["handle"]), Audio: playback})
 			filePreview.Caption += fmt.Sprintf(" · %.1f seconds", float64(playback.DurationMillis)/1000)
 		}
-		return nativeui.Screen{Title: "Attachment", Images: images, Attachments: attachments, FilePreview: filePreview, Actions: []nativeui.Action{{ID: "share", Label: "Share file"}, {ID: "export", Label: "Export file", Primary: true}, {ID: "remove", Label: "Remove"}}}, nil
+		components, err := mediaComponents(images, attachments, filePreview)
+		if err != nil {
+			return nativeui.Screen{}, err
+		}
+		return nativeui.Screen{Title: "Attachment", Components: components, Actions: []nativeui.Action{{ID: "share", Label: "Share file"}, {ID: "export", Label: "Export file", Primary: true}, {ID: "remove", Label: "Remove"}}}, nil
 	}, Actions: map[string]nativeui.Handle{
 		"share": requestAttachmentShare(load),
 		"export": func(ctx context.Context, request nativeui.Request) (nativeui.Result, error) {

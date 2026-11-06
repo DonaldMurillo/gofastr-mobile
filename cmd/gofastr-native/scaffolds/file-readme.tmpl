@@ -1,0 +1,56 @@
+# Compiled document extension
+
+Identity: `{{.Name}}`. Package: `adapter`. Factory: `{{.Factory}}`.
+This is a library, not an application template. No dependencies were installed.
+Use the consuming module's pinned matching gofastr-native version.
+
+```go
+import (
+    "github.com/DonaldMurillo/gofastr-native/device/files"
+    "github.com/DonaldMurillo/gofastr-native/extension"
+    "github.com/DonaldMurillo/gofastr-native/nativeui"
+    documents "your/module/path/to/this/package"
+)
+
+screens, err := nativeui.NewWithExtensions("/", []extension.Definition{
+    documents.Definition(),
+}, routes...)
+operation, err := documents.Acquire(files.Pick{
+    Title: "Import text", Extensions: []string{".txt"}, MaxBytes: 1024,
+})
+```
+
+Check both errors. `routes` are the consuming app's ordinary Go routes.
+Put `operation` in `nativeui.FileRequest.Extension` and use `screens` as its app.
+Handle the file result in Go, checking application authorization and accepting
+only the validated document. Consult the consuming app for its route/action setup.
+
+`init` calls `extension/webassets.Register(Definition())` to publish static
+compiled assets before GoFastr seals the behavior manifest. Do not move it to
+app startup. Publication does NOT select the definition for every app, activate
+a host, request permission, or authorize a result; selection remains explicit.
+
+UIKit delegates to the shared single-document foreground task. WebView uses
+an explicit browser chooser (`fallback`, not native acquisition). Both enforce
+the requested byte bound; Go's `files.Pick.Accept` is authoritative. The scaffold
+does not claim camera access or media normalization. Adapt policies and adapters
+together; never accept paths, arbitrary URLs, HTML or executable app scripts.
+
+From the module root:
+
+```sh
+go test ./path/to/this/package
+gofastr-native extension check --pkg ./path/to/this/package
+gofastr-native extension check --pkg ./path/to/consuming/bind/package
+```
+
+Then build/test the consuming UIKit and WebView apps. Static check validates
+manifests/assets/collisions, not Swift/JS behavior or hardware permission UX.
+If combining libraries, retain unique names, capability owners and Swift factories.
+
+## Maintainer notes
+
+Keep the JSON manifest, embedded sources, static factory identity/capabilities
+and authoritative Go validators in sync. Never replace bounded result validation
+with a filename filter. Next time, test cancellation and rejected/oversized
+provider results through both renderers before broadening the policy.

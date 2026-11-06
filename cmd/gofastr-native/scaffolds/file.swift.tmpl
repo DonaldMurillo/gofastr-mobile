@@ -1,0 +1,25 @@
+import UIKit
+
+enum {{.Factory}}: MobileFileExtensionFactory {
+    static let name = {{.Name}}
+
+    static func capabilities() -> [String: String] { [name: "available"] }
+
+    static func valid(_ operation: MobileFileExtension) -> Bool {
+        guard operation.name == name, operation.isValid,
+              let request = try? JSONDecoder().decode(MobileFilePick.self, from: Data(operation.payload.utf8)),
+              !request.title.isEmpty, request.title.utf8.count <= 200,
+              (1...MobileFileAccess.maximumBytes).contains(request.maxBytes),
+              (request.extensions?.count ?? 0) <= 16 else { return false }
+        return (try? MobileFileAccess.extensions(request)) != nil
+    }
+
+    static func make(_ operation: MobileFileExtension, identifier: String, source: UIViewController,
+                     focus: MobileForegroundFocus, queue: DispatchQueue,
+                     respond: @escaping (MobileFileResult) -> Void) -> MobileForegroundTask? {
+        guard valid(operation),
+              let request = try? JSONDecoder().decode(MobileFilePick.self, from: Data(operation.payload.utf8)) else { return nil }
+        let model = MobileFiles(id: identifier, pick: request, export: nil, photo: nil, extension: nil)
+        return MobileFileTask(model, identifier: identifier, source: source, focus: focus, queue: queue, respond: respond)
+    }
+}

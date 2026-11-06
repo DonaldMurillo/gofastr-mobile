@@ -27,7 +27,9 @@ import (
 const usage = `gofastr-native builds a GoFastr app into a phone app and runs it.
 
 Usage:
-  gofastr-native doctor [--platform ios-sim|android-emu]
+  gofastr-native doctor [--platform ios-sim|android-emu|ios-device]
+  gofastr-native extension check --pkg <Go package> [--dry-run]
+  gofastr-native extension init --name <namespace/v1> --out <new-directory> [--kind file|component] [--dry-run]
   gofastr-native build  --platform ios-sim|android-emu --pkg <bind package> [flags]
   gofastr-native run    --platform ios-sim|android-emu --pkg <bind package> [flags]
 
@@ -54,6 +56,14 @@ Flags (run only):
   --device      simulator name or UDID / adb serial or AVD name
   --screenshot  write a screenshot here once the app is up
   --wait        how long to wait before the screenshot (default 8s)
+
+Flags (doctor --platform ios-device only):
+  --app         existing signed physical-device .app bundle (never modified)
+  --pkg         consuming Go package; check compiled extension manifests/assets
+  --device      optional exact CoreDevice identifier or UDID (otherwise iPhone)
+  --require     comma-separated camera,microphone,notifications,extensions gates
+  --url-scheme  expected application-specific reminder/deep-link scheme
+  --dry-run     no commands, temporary reports, or writes; readiness NOT RUN
 `
 
 func main() {
@@ -68,6 +78,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	sub, rest := args[0], args[1:]
+	if sub == "extension" {
+		return extensionCommand(ctx, rest, stdout, stderr)
+	}
 	fs := flag.NewFlagSet(sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprint(stderr, usage) }
@@ -85,6 +98,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	dry := fs.Bool("dry-run", false, "print the steps only")
 	device := fs.String("device", "", "simulator / device / AVD")
 	shot := fs.String("screenshot", "", "screenshot path")
+	existingApp := fs.String("app", "", "existing signed iOS device app (doctor only)")
+	require := fs.String("require", "", "required iOS device features (doctor only)")
 	wait := fs.Duration("wait", 8*time.Second, "wait before the screenshot")
 	if err := fs.Parse(rest); err != nil {
 		return 2
@@ -94,9 +109,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	r := &runner{ctx: ctx, out: stdout, dryRun: *dry}
+	if (*existingApp != "" || *require != "") && (sub != "doctor" || *platform != "ios-device") {
+		fmt.Fprintln(stderr, "--app and --require are only supported by doctor --platform ios-device")
+		return 2
+	}
 
 	switch sub {
 	case "doctor":
+		if *platform == "ios-device" {
+			return doctorIOSDevice(r, deviceDoctorOptions{app: *existingApp, pkg: *pkg, device: *device, scheme: *urlScheme, require: *require}, stderr)
+		}
+		if *platform != "" && *platform != "ios-sim" && *platform != "android-emu" {
+			fmt.Fprintln(stderr, "doctor --platform must be ios-sim, android-emu, or ios-device")
+			return 2
+		}
 		return doctor(r, *platform)
 	case "build", "run":
 	default:

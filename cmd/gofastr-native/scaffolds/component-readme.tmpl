@@ -1,0 +1,56 @@
+# Compiled text component
+
+Identity: `{{.Name}}`. Package: `adapter`. Factory: `{{.Factory}}`.
+This working read-only text library is not an app template. No dependencies
+were installed; use the consuming module's pinned matching gofastr-native version.
+
+```go
+import (
+    "github.com/DonaldMurillo/gofastr-native/extension"
+    "github.com/DonaldMurillo/gofastr-native/nativeui"
+    textblock "your/module/path/to/this/package"
+)
+
+screens, err := nativeui.NewWithExtensions("/", []extension.Definition{
+    textblock.Definition(),
+}, routes...)
+block, err := textblock.Block("summary", textblock.Content{Text: "Hello from Go"})
+screen := nativeui.Screen{Title: "Example", Components: []extension.Component{block}}
+```
+
+Check both errors; `routes` are your app's ordinary Go routes. Return `screen`
+from a route and use `screens` as the consuming app. Keep the block ID stable
+while content updates. Text is not interpreted as HTML or Markdown. Payloads
+contain no source, filesystem paths or remote URLs. There are no write events.
+
+Package `init` publishes compiled metadata with `webassets.Register` before
+GoFastr seals its behavior manifest. This does not select the library for every
+app, activate a host, request permission, or bypass Go authorization. Select
+`Definition()` explicitly using `nativeui.NewWithExtensions`.
+
+The manifest has `kind: component` and exactly its own name as a capability.
+The Go definition supplies `ValidateComponent`, not file `Validate`/`Accept`.
+UIKit implements `MobileComponentExtensionFactory.make(payload:compact:emit:)`
+and returns a `MobileComponentExtensionView` with `view`,
+`update(payload:emit:)` and `dispose()`.
+WebView `mount(container, component, host)` returns `update(next)` and `dispose()`.
+If adding navigation, emit only opaque event keys mapped to Go-owned destinations;
+never navigate arbitrary URLs or invent a second mutation/service channel.
+
+From the module root:
+
+```sh
+go test ./path/to/this/package
+gofastr-native extension check --pkg ./path/to/this/package
+gofastr-native extension check --pkg ./path/to/consuming/bind/package
+```
+
+Build/test both consuming renderers. Static check does not compile Swift/JS,
+exercise disposal/reconciliation or establish physical accessibility acceptance.
+
+## Maintainer notes
+
+Keep the Go validator, manifest identity/capability, Swift factory and JS adapter
+in sync. Next time, test update/dispose, large text, stable IDs and accessibility
+before broadening content or adding event keys. Never store draft/editor state
+in this presentation snapshot.

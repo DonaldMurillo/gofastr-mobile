@@ -18,7 +18,7 @@ func TestFilesWireAndBoundedAccess(t *testing.T) {
 	}
 	directory := t.TempDir()
 	arguments := []string{"--sdk", "macosx", "swiftc", "-parse-as-library", "-module-cache-path", filepath.Join(directory, "module-cache")}
-	for _, name := range []string{"GofastrComponents.swift", "GofastrFiles.swift", "GofastrPresentation.swift", "GofastrActions.swift", "GofastrImages.swift", "GofastrAttachments.swift", "GofastrServices.swift"} {
+	for _, name := range []string{"GofastrComponents.swift", "GofastrComponentExtensions.swift", "GofastrFiles.swift", "GofastrPresentation.swift", "GofastrActions.swift", "GofastrImages.swift", "GofastrAttachments.swift", "GofastrServices.swift"} {
 		source, err := Sources.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)

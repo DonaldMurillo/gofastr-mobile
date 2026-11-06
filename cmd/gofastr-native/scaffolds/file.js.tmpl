@@ -1,0 +1,44 @@
+(() => {
+  'use strict';
+  const name = {{.Name}};
+  const supported = () => typeof File === 'function' && typeof Blob === 'function' && typeof Blob.prototype.arrayBuffer === 'function' && typeof btoa === 'function' && typeof TextEncoder === 'function';
+  (window.__gofastr_file_extension_definitions ||= []).push({
+    name,
+    capabilities: () => ({ [name]: supported() ? 'fallback' : 'unavailable' }),
+    prepare(request) {
+      if (!request || typeof request.title !== 'string' || !request.title ||
+          new TextEncoder().encode(request.title).length > 200 ||
+          !Number.isSafeInteger(request.maxBytes) || request.maxBytes < 1 || request.maxBytes > 1048576 ||
+          (request.extensions !== undefined && (!Array.isArray(request.extensions) || request.extensions.length > 16 ||
+            !request.extensions.every(value => typeof value === 'string' && /^\.[^./\\,;\s\x00-\x1f]{1,15}$/.test(value))))) return null;
+      return {
+        kind: 'document', title: request.title, label: 'Choose document',
+        hint: 'Choose one bounded file. The Go policy validates its name, type and size.',
+        attributes: { accept: (request.extensions || []).join(',') }, supported,
+        progress: 'Reading document…',
+        job() {
+          let cancelled = false;
+          return {
+            cancel() { cancelled = true; },
+            check() { if (cancelled) throw Object.assign(new Error('Cancelled'), { name: 'AbortError' }); },
+          };
+        },
+        async normalize(file, operation) {
+          operation.check();
+          if (!file || file.size > request.maxBytes || typeof file.name !== 'string' || !file.name ||
+              file.name === '.' || file.name === '..' || /[/\\\x00-\x1f\x7f-\x9f]/.test(file.name) ||
+              new TextEncoder().encode(file.name).length > 200 ||
+              (request.extensions?.length && !request.extensions.some(suffix => file.name.toLowerCase().endsWith(suffix.toLowerCase())))) {
+            throw new Error('Invalid or oversized document');
+          }
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          operation.check();
+          if (bytes.length > request.maxBytes) throw new Error('Oversized document');
+          let binary = '';
+          for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+          return { name: file.name, mediaType: 'application/octet-stream', data: btoa(binary) };
+        },
+      };
+    },
+  });
+})();

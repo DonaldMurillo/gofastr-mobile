@@ -1,0 +1,54 @@
+// Package adapter provides a compiled, bounded single-document acquisition library.
+package adapter
+
+import (
+	"embed"
+	"encoding/json"
+	"errors"
+
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/extension"
+	"github.com/DonaldMurillo/gofastr-native/extension/webassets"
+)
+
+//go:embed gofastr-native.extension.json Adapter.swift adapter.js
+var assets embed.FS
+
+const Name = {{.Name}}
+
+func init() { webassets.Register(Definition()) }
+
+// Acquire constructs an operation using the standard bounded picker policy.
+func Acquire(request files.Pick) (*extension.FileOperation, error) {
+	if err := request.Validate(); err != nil { return nil, err }
+	payload, err := json.Marshal(request)
+	if err != nil { return nil, err }
+	return &extension.FileOperation{Name: Name, Payload: string(payload)}, nil
+}
+
+func policy(operation extension.FileOperation) (files.Pick, error) {
+	var request files.Pick
+	if operation.Name != Name { return request, errors.New("adapter: unexpected extension identity") }
+	if err := extension.Decode(operation.Payload, &request); err != nil { return request, err }
+	return request, request.Validate()
+}
+
+// Definition supplies the embedded adapters and authoritative request/result policy.
+// Importing publishes static assets; each app must also explicitly select this definition.
+func Definition() extension.Definition {
+	content, err := assets.ReadFile(extension.ManifestName)
+	if err != nil { panic(err) }
+	manifest, err := extension.ParseManifest(content)
+	if err != nil { panic(err) }
+	return extension.Definition{Manifest: manifest, Assets: assets,
+		Validate: func(operation extension.FileOperation) (string, error) {
+			_, err := policy(operation)
+			return Name, err
+		},
+		Accept: func(operation extension.FileOperation, document files.Document) error {
+			request, err := policy(operation)
+			if err != nil { return err }
+			return request.Accept(document)
+		},
+	}
+}

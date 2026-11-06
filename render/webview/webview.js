@@ -6,6 +6,7 @@
   const services = window.__gofastr_services;
   const live = window.__gofastr_live;
   const components = window.__gofastr_components;
+  const rendering = window.__gofastr_rendering;
   const modalOpen = () => presentations.has() || !!files?.has() || !!services?.has();
   if (document.__gfwBound) return;
   document.__gfwBound = true;
@@ -217,7 +218,11 @@
       await window.__gofastr.loadModule(name);
     }
   };
-  const connect = root => connection ||= loadExtensions(root).then(() => services?.capabilities() || { 'live/v1': 'available' }).then(serviceCapabilities => request(root, { kind: 'hello', hello: {
+  const connect = root => connection ||= loadExtensions(root).then(async () => {
+    const names = JSON.parse(root.dataset.gfwConfig || '{}').componentExtensions || [];
+    if (names.length && !rendering) throw new Error('Required component rendering support is unavailable.');
+    return { ...(await services?.capabilities() || { 'live/v1': 'available' }), ...(rendering?.capabilities(names) || {}) };
+  }).then(serviceCapabilities => request(root, { kind: 'hello', hello: {
     minimum: 1, maximum: 1, renderer: 'webview', capabilities: {
       'navigation/v1': 'available', 'editor/v1': 'available', 'drafts/v1': 'available',
       'sheets/v1': 'fallback', 'share/v1': typeof navigator.share === 'function' ? 'available' : 'fallback',
@@ -295,6 +300,7 @@
     root.dataset.gfwCapabilities = JSON.stringify({ ...capabilities(), ...hello.contract?.capabilities });
     showImages(root, state, reply.screen?.images || []);
     showAttachments(root, state, reply.screen?.attachments || []);
+    showComponents(root, state, reply.screen?.components || []);
     state.hasEditor = !!reply.screen?.form;
     state.dataVersion = reply.screen?.live?.version || reply.dataVersion || state.config.live?.version || '';
     if (live && reply.screen?.list && !state.hasEditor) {
@@ -362,6 +368,7 @@
           state.config.list = screen.list;
           state.config.route = screen.route;
           state.config.live = screen.live;
+          state.config.components = screen.components || [];
           state.dataVersion = screen.live?.version || reply.dataVersion || '';
           state.revision = reply.revision || 0;
           state.actionRow = '';
@@ -372,6 +379,7 @@
           syncSelection(state);
           showImages(root, state, screen.images || []);
           showAttachments(root, state, screen.attachments || []);
+          showComponents(root, state, screen.components || []);
           if (options.route) {
             runtime?._pushURL?.(screen.route, { replace: options.replace !== false });
             const query = root.querySelector('[data-gfw-search]');
@@ -425,8 +433,28 @@
     }
   };
 
+  const showComponents = (root, state, snapshots) => {
+    state.config.components = snapshots;
+    root.dataset.gfwConfig = JSON.stringify(state.config);
+    state.source = root.dataset.gfwConfig;
+    if (!rendering) {
+      if (snapshots.length) throw new Error('Required component rendering support is unavailable.');
+      return;
+    }
+    state.rendering ||= rendering.create(root);
+    state.rendering.reconcile(snapshots, { names: state.config.componentExtensions || [], open: async (snapshot, key) => {
+      if (!current(state)) return;
+      const epoch = state.navigationEpoch = (state.navigationEpoch || 0) + 1;
+      if (!(await leave(root, state)) || !current(state) || !root.isConnected || epoch !== state.navigationEpoch) return;
+      const latest = state.config.components.find(item => item.id === snapshot.id && item.name === snapshot.name);
+      const destination = latest && Object.hasOwn(latest.destinations || {}, key) && local(state.config, latest.destinations[key]);
+      if (!destination) { status(root, 'This component destination is not an app screen.', true); return; }
+      navigate(root, state, destination);
+    } });
+  };
+
   const showAttachments = (root, state, attachments) => {
-    const section = root.querySelector('[data-gfw-attachments]');
+    const section = Array.from(root.querySelectorAll('[data-gfw-attachments]')).find(item => !item.closest('[data-gfw-component]'));
     if (!section || !Array.isArray(attachments)) return;
     services?.releasePlayback(section);
     const heading = document.createElement('h2');
@@ -457,7 +485,7 @@
   };
 
   const showImages = (root, state, images) => {
-    const gallery = root.querySelector('[data-gfw-images]');
+    const gallery = Array.from(root.querySelectorAll('[data-gfw-images]')).find(item => !item.closest('[data-gfw-component]'));
     if (!gallery || !Array.isArray(images)) return;
     const children = [];
     const heading = document.createElement('h2');
@@ -600,10 +628,11 @@
     }
   };
 
-  const retire = state => {
+  const retire = (state, retainRendering = false) => {
     if (state.retired) return;
     state.retired = true;
     state.live?.close();
+    if (!retainRendering) state.rendering?.dispose();
     clearTimeout(state.checkpointTimer);
     if (swipe?.state === state) resetSwipe();
     presentations.close(state.root, false);
@@ -623,11 +652,13 @@
       let config;
       try { config = JSON.parse(source); } catch (_) { continue; }
       if (!form) continue;
-      if (previous) retire(previous);
+      const retainRendering = previous && previous.form === form && previous.config.route === config.route;
+      if (previous) retire(previous, retainRendering);
       delete root.dataset.gfwInstance;
       delete root.dataset.gfwEditor;
       const state = { config, source, form, root, baseline: values(form, true, true), initialStatus: root.querySelector('[data-gfw-status]').textContent,
-        busy: false, revision: 0, receipts: [], checkpointTimer: null, composing: new Set(),
+        busy: false, revision: 0, receipts: [], checkpointTimer: null, composing: retainRendering ? previous.composing : new Set(),
+        rendering: retainRendering ? previous.rendering : undefined,
         selected: components.reconcile(config.list?.selection?.selected, config.list?.rows || [], config.list?.selection?.maximum), actionRow: '' };
       const identity = components.collectionIdentity(config, location.href);
       const previousSelection = identity && collectionSelections.get(identity.key);
@@ -643,7 +674,7 @@
         formResult(state, false);
       } else if (config.committed) {
         if (!removeDraft(state)) status(root, 'Saved, but the old local draft could not be removed.', true);
-      } else if (storageKey(state) && form.dataset.gfwError !== 'true') {
+      } else if (storageKey(state) && form.dataset.gfwError !== 'true' && !state.composing.size) {
         try {
           const raw = sessionStorage.getItem(storageKey(state));
           const draft = raw ? JSON.parse(raw) : null;

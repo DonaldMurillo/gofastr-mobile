@@ -1,6 +1,6 @@
 import Foundation
 
-struct MobileImage: Decodable {
+struct MobileImage: Decodable, Equatable {
     let id: String
     let alt: String
     let data: Data
@@ -15,65 +15,92 @@ import UIKit
 final class MobileImageGallery: UIStackView {
     var open: ((String) -> Void)?
     var compact = false
-    private var previews: [MobileImage] = []
+    private let heading = UILabel()
+    private let items = MobileKeyedResources<MobileImageControl>(dispose: { $0.removeFromSuperview() })
 
     init() {
         super.init(frame: .zero)
         axis = .vertical
         spacing = 12
         isHidden = true
-    }
-
-    required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func update(_ images: [MobileImage]) {
-        guard images.count != previews.count || zip(images, previews).contains(where: { $0.id != $1.id || $0.data != $1.data || $0.alt != $1.alt || $0.destination != $1.destination }) else { return }
-        previews = images
-        for child in arrangedSubviews {
-            removeArrangedSubview(child)
-            child.removeFromSuperview()
-        }
-        isHidden = images.isEmpty
-        guard !images.isEmpty else { return }
-        let heading = UILabel()
-        heading.text = images.count == 1 ? "Photo" : "Photos"
         heading.font = .preferredFont(forTextStyle: .subheadline)
         heading.textColor = .secondaryLabel
         heading.adjustsFontForContentSizeCategory = true
         heading.numberOfLines = 0
         heading.accessibilityTraits = .header
-        addArrangedSubview(heading)
+    }
+
+    required init(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func update(_ images: [MobileImage]) {
+        isHidden = images.isEmpty
+        heading.text = images.count == 1 ? "Photo" : "Photos"
+        items.reconcile(images.map(\.id)) { _ in MobileImageControl() }
         for preview in images {
-            guard preview.width > 0, preview.height > 0, preview.data.count <= 128 * 1024,
-                  let image = UIImage(data: preview.data) else { continue }
-            let container = UIControl()
-            let picture = UIImageView(image: image)
-            picture.translatesAutoresizingMaskIntoConstraints = false
-            picture.contentMode = compact ? .scaleAspectFill : .scaleAspectFit
-            picture.layer.cornerRadius = 16
-            picture.clipsToBounds = true
-            container.addSubview(picture)
-            NSLayoutConstraint.activate([
-                picture.topAnchor.constraint(equalTo: container.topAnchor),
-                picture.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-                picture.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                picture.trailingAnchor.constraint(equalTo: container.trailingAnchor)
-            ])
-            if compact {
-                picture.heightAnchor.constraint(equalToConstant: 200).isActive = true
-            } else {
-                picture.heightAnchor.constraint(equalTo: picture.widthAnchor, multiplier: CGFloat(preview.height) / CGFloat(preview.width)).isActive = true
+            items[preview.id]?.update(preview, compact: compact, open: open)
+        }
+        let children: [UIView] = images.isEmpty ? [] : [heading] + items.resources
+        if arrangedSubviews.count != children.count || zip(arrangedSubviews, children).contains(where: { $0 !== $1 }) {
+            for child in arrangedSubviews {
+                removeArrangedSubview(child)
+                child.removeFromSuperview()
             }
-            container.isAccessibilityElement = true
-            container.accessibilityLabel = preview.alt
-            container.accessibilityIdentifier = "native.image.\(preview.id)"
-            container.accessibilityTraits = .image
-            if let destination = preview.destination, !destination.isEmpty {
-                container.accessibilityTraits.insert(.button)
-                container.accessibilityHint = "Open photo attachment"
-                container.addAction(UIAction { [weak self] _ in self?.open?(destination) }, for: .touchUpInside)
-            }
-            addArrangedSubview(container)
+            children.forEach(addArrangedSubview)
+        }
+    }
+}
+
+private final class MobileImageControl: UIControl {
+    private let picture = UIImageView()
+    private var preview: MobileImage?
+    private var compact = false
+    private var aspect: NSLayoutConstraint?
+    private var action: UIAction?
+
+    init() {
+        super.init(frame: .zero)
+        picture.translatesAutoresizingMaskIntoConstraints = false
+        picture.layer.cornerRadius = 16
+        picture.clipsToBounds = true
+        addSubview(picture)
+        NSLayoutConstraint.activate([
+            picture.topAnchor.constraint(equalTo: topAnchor), picture.bottomAnchor.constraint(equalTo: bottomAnchor),
+            picture.leadingAnchor.constraint(equalTo: leadingAnchor), picture.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+        isAccessibilityElement = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func update(_ next: MobileImage, compact: Bool, open: ((String) -> Void)?) {
+        if let action { removeAction(action, for: .touchUpInside) }
+        action = nil
+        guard next.width > 0, next.height > 0, next.data.count <= 128 * 1024 else { isHidden = true; return }
+        if preview?.data != next.data {
+            guard let image = UIImage(data: next.data) else { isHidden = true; return }
+            picture.image = image
+        }
+        guard picture.image != nil else { isHidden = true; return }
+        isHidden = false
+        if aspect == nil || preview?.width != next.width || preview?.height != next.height || self.compact != compact {
+            aspect?.isActive = false
+            aspect = compact ? picture.heightAnchor.constraint(equalToConstant: 200) :
+                picture.heightAnchor.constraint(equalTo: picture.widthAnchor, multiplier: CGFloat(next.height) / CGFloat(next.width))
+            aspect?.isActive = true
+        }
+        preview = next
+        self.compact = compact
+        picture.contentMode = compact ? .scaleAspectFill : .scaleAspectFit
+        accessibilityLabel = next.alt
+        accessibilityIdentifier = "native.image.\(next.id)"
+        accessibilityTraits = .image
+        accessibilityHint = nil
+        if let destination = next.destination, !destination.isEmpty {
+            accessibilityTraits.insert(.button)
+            accessibilityHint = "Open photo attachment"
+            let action = UIAction { _ in open?(destination) }
+            self.action = action
+            addAction(action, for: .touchUpInside)
         }
     }
 }

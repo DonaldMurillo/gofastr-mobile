@@ -1,0 +1,37 @@
+import UIKit
+
+enum {{.Factory}}: MobileComponentExtensionFactory {
+    static let name = {{.Name}}
+
+    static func capabilities() -> [String: String] { [name: "available"] }
+
+    static func make(payload: String, compact: Bool, emit: @escaping (String) -> Void) throws -> MobileComponentExtensionView {
+        try {{.Factory}}View(payload: payload, compact: compact, emit: emit)
+    }
+}
+
+private final class {{.Factory}}View: MobileComponentExtensionView {
+    private struct Content: Decodable { let text: String }
+    private let label = UILabel()
+    private var disposed = false
+    var view: UIView { label }
+
+    init(payload: String, compact: Bool, emit: @escaping (String) -> Void) throws {
+        label.numberOfLines = 0
+        label.font = .preferredFont(forTextStyle: compact ? .callout : .body)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .label
+        try update(payload: payload, emit: emit)
+    }
+
+    func update(payload: String, emit: @escaping (String) -> Void) throws {
+        guard !disposed else { return }
+        guard !payload.isEmpty, payload.utf8.count <= MobileComponent.maximumPayloadBytes else { throw MobileComponentFailure.invalidPayload }
+        let content = try JSONDecoder().decode(Content.self, from: Data(payload.utf8))
+        guard !content.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              content.text.utf8.count <= 8192, !content.text.contains("\0") else { throw MobileComponentFailure.invalidPayload }
+        label.text = content.text
+    }
+
+    func dispose() { disposed = true; label.text = nil; label.removeFromSuperview() }
+}

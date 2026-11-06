@@ -1,0 +1,21 @@
+package adapter
+
+import (
+	"testing"
+
+	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/extension"
+	"github.com/DonaldMurillo/gofastr-native/extension/webassets"
+)
+
+func TestLibraryContract(t *testing.T) {
+	definition := Definition()
+	if _, err := extension.New(definition); err != nil { t.Fatal(err) }
+	if _, err := webassets.Module(definition); err != nil { t.Fatal(err) }
+	operation, err := Acquire(files.Pick{Title: "Import text", Extensions: []string{".txt"}, MaxBytes: 1024})
+	if err != nil { t.Fatal(err) }
+	if capability, err := definition.Validate(*operation); err != nil || capability != Name { t.Fatal(capability, err) }
+	if err := definition.Accept(*operation, files.Document{Name: "note.txt", MediaType: "text/plain", Data: []byte("hello")}); err != nil { t.Fatal(err) }
+	if err := definition.Accept(*operation, files.Document{Name: "other.bin", MediaType: "application/octet-stream"}); err == nil { t.Fatal("accepted disallowed suffix") }
+	if _, err := Acquire(files.Pick{}); err == nil { t.Fatal("accepted unbounded request") }
+}

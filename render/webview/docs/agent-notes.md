@@ -1,5 +1,16 @@
 # WebView implementation notes
 
+Rendering extension API, lifecycle, and browser acceptance selectors:
+[`rendering-extensions.md`](rendering-extensions.md).
+
+## 2026-11-05 - Component refresh must preserve media and detail containment
+- Scope: WebView compiled rendering components and `extensions/media/media.js`.
+- Trigger: replacing media on refresh loses playback; sibling detail galleries broke `[data-gfw-file-preview] img` acceptance.
+- Approach: load selected descriptors before hello, mount only available support, reconcile by ID/name, preserve media nodes and active IME, and nest detail media inside the preview article.
+- Evidence: `node --test render/webview/rendering.test.cjs`; `go test ./render/webview -run 'TestRendering|TestComponentHost'`.
+- Next time: pass whole snapshots to updates, resolve only opaque keys through host guards, keep legacy empty placeholders out of component-only screens, and dispose/revoke on removal or retirement.
+- Status: active; real Notes Chromium acceptance remains the parent's separate gate.
+
 ## 2026-11-05 - Compiled file adapters use the shared foreground lifecycle
 - Scope: extension assets and file acquisition.
 - Approach: library init registers content-addressed assets through `extension/webassets`; app-specific config loads selected modules before hello. Never register new behaviors after a host seals its manifest.

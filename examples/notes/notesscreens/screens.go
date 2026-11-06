@@ -10,6 +10,7 @@ import (
 	"github.com/DonaldMurillo/gofastr-native/device/files"
 	"github.com/DonaldMurillo/gofastr-native/examples/notes/notes"
 	"github.com/DonaldMurillo/gofastr-native/extension"
+	"github.com/DonaldMurillo/gofastr-native/extensions/media"
 	"github.com/DonaldMurillo/gofastr-native/extensions/photos"
 	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
@@ -34,7 +35,7 @@ func New(service *notes.Service, stores ...*files.Store) (*nativeui.App, error) 
 		aboutRoute("/settings/about", "pop"),
 	}
 	routes = append(append(append(routes, fileRoutes(service, attachments)...), behaviorRoutes()...), settingsRoute())
-	return nativeui.NewWithExtensions(Root, []extension.Definition{photos.Definition()}, tabShell(routes)...)
+	return nativeui.NewWithExtensions(Root, []extension.Definition{photos.Definition(), media.Definition()}, tabShell(routes)...)
 }
 
 func editor(service *notes.Service, store *files.Store) nativeui.Render {
@@ -61,7 +62,11 @@ func editor(service *notes.Service, store *files.Store) nativeui.Render {
 		if err != nil {
 			return nativeui.Screen{}, err
 		}
-		return nativeui.Screen{Title: title, Actions: actions, Images: images, Attachments: attachments,
+		components, err := mediaComponents(images, attachments, nil)
+		if err != nil {
+			return nativeui.Screen{}, err
+		}
+		return nativeui.Screen{Title: title, Actions: actions, Components: components,
 			Form: &nativeui.Form{Style: "document", DetailsTitle: "Note details", Status: status, Fields: []nativeui.Field{
 				{Key: "title", Label: "Title", Placeholder: "Title", Value: note.Title, Kind: "text", Style: "title", Required: true},
 				{Key: "body", Label: "Note", Placeholder: "Start writing…", Value: note.Body, Kind: "multiline"},

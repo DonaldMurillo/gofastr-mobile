@@ -23,53 +23,70 @@ type compiledExtension struct {
 }
 
 func discoverExtensions(r *runner, packagePath string) ([]compiledExtension, error) {
+	if packagePath == "" || strings.HasPrefix(packagePath, "-") {
+		return nil, errors.New("--pkg must name a Go package, not a go list flag")
+	}
 	content, err := r.outputBytes("discover compiled native extensions", nil, "env", "GOOS=ios", "GOARCH=arm64", "CGO_ENABLED=1", "go", "list", "-deps", "-json", packagePath)
 	if err != nil {
 		return nil, err
 	}
+	return discoverExtensionManifests(content)
+}
+
+func discoverExtensionManifests(content []byte) ([]compiledExtension, error) {
 	decoder := json.NewDecoder(bytes.NewReader(content))
-	var result []compiledExtension
-	seen, capabilities, factories := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	var directories []string
 	for {
 		var dependency struct{ Dir string }
 		if err := decoder.Decode(&dependency); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("decode compiled dependency graph: %w", err)
 		}
-		if dependency.Dir == "" {
-			continue
+		if dependency.Dir != "" {
+			directories = append(directories, dependency.Dir)
 		}
-		path := filepath.Join(dependency.Dir, extension.ManifestName)
+	}
+	sort.Strings(directories)
+	var result []compiledExtension
+	seen, capabilities, factories := map[string]string{}, map[string]string{}, map[string]string{}
+	for _, directory := range directories {
+		path := filepath.Join(directory, extension.ManifestName)
 		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 			continue
 		} else if err != nil {
 			return nil, err
 		}
-		content, err := extensionAsset(dependency.Dir, extension.ManifestName, extension.MaxPayload)
+		content, err := extensionAsset(directory, extension.ManifestName, extension.MaxPayload)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		manifest, err := extension.ParseManifest(content)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		if seen[manifest.Name] || factories[manifest.IOS.Factory] || len(result) >= 16 {
-			return nil, errors.New("duplicate or excessive compiled extensions")
+		if previous, exists := seen[manifest.Name]; exists {
+			return nil, fmt.Errorf("%s: extension identity %q also declared in %s; use distinct versioned names", path, manifest.Name, previous)
 		}
-		seen[manifest.Name], factories[manifest.IOS.Factory] = true, true
+		if previous, exists := factories[manifest.IOS.Factory]; exists {
+			return nil, fmt.Errorf("%s: Swift factory %q also owned by %s; rename one factory and its manifest entry", path, manifest.IOS.Factory, previous)
+		}
+		if len(result) >= 16 {
+			return nil, fmt.Errorf("%s: compiled extension limit is 16; remove unused extension imports", path)
+		}
+		seen[manifest.Name], factories[manifest.IOS.Factory] = path, manifest.Name
 		for _, capability := range manifest.Capabilities {
-			if capabilities[capability] {
-				return nil, errors.New("compiled extension capabilities overlap")
+			if previous, exists := capabilities[capability]; exists {
+				return nil, fmt.Errorf("%s: capability %q also owned by %s; each capability must have one compiled owner", path, capability, previous)
 			}
-			capabilities[capability] = true
+			capabilities[capability] = manifest.Name
 		}
 		for _, source := range append(append([]string(nil), manifest.IOS.Sources...), manifest.WebView.Script) {
-			if _, err := extensionAsset(dependency.Dir, source, 512*1024); err != nil {
-				return nil, err
+			if _, err := extensionAsset(directory, source, 512*1024); err != nil {
+				return nil, fmt.Errorf("%s: asset %q for %s: %w; bundle a nonempty regular asset (at most 512 KiB) without symlinks", path, source, manifest.Name, err)
 			}
 		}
-		result = append(result, compiledExtension{manifest, dependency.Dir})
+		result = append(result, compiledExtension{manifest, directory})
 	}
 	sort.Slice(result, func(first, second int) bool { return result[first].manifest.Name < result[second].manifest.Name })
 	return result, nil
@@ -91,12 +108,16 @@ func extensionAsset(directory, name string, limit int64) ([]byte, error) {
 	if real != path || !strings.HasPrefix(real, root+string(filepath.Separator)) {
 		return nil, errors.New("extension assets must stay in their package without symlinks")
 	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, errors.New("extension asset must be a regular file")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	info, err := file.Stat()
+	info, err = file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, errors.New("extension asset must be a regular file")
 	}
@@ -111,9 +132,17 @@ func extensionAsset(directory, name string, limit int64) ([]byte, error) {
 }
 
 func copyIOSExtensions(r *runner, definitions []compiledExtension, directory string) ([]string, error) {
-	var sources, factories, guards []string
+	definitions = append([]compiledExtension(nil), definitions...)
+	sort.Slice(definitions, func(first, second int) bool {
+		return definitions[first].manifest.Name < definitions[second].manifest.Name
+	})
+	var sources, fileFactories, componentFactories, guards []string
 	for _, definition := range definitions {
-		factories = append(factories, definition.manifest.IOS.Factory+".self")
+		if definition.manifest.Kind == extension.ComponentKind {
+			componentFactories = append(componentFactories, definition.manifest.IOS.Factory+".self")
+		} else {
+			fileFactories = append(fileFactories, definition.manifest.IOS.Factory+".self")
+		}
 		var capabilities []string
 		for _, capability := range definition.manifest.Capabilities {
 			capabilities = append(capabilities, strconv.Quote(capability))
@@ -137,7 +166,7 @@ func copyIOSExtensions(r *runner, definitions []compiledExtension, directory str
 	}
 	catalog := filepath.Join(directory, "GofastrCompiledExtensions.swift")
 	if err := r.do("generate the compiled extension factory catalog", func() error {
-		return writeOwnerOnly(catalog, []byte("enum GofastrCompiledExtensions {\n    static func install() {\n"+strings.Join(guards, "")+"        MobileFileExtensions.install(["+strings.Join(factories, ", ")+"])\n    }\n}\n"))
+		return writeOwnerOnly(catalog, []byte("enum GofastrCompiledExtensions {\n    static func install() {\n"+strings.Join(guards, "")+"        MobileFileExtensions.install(["+strings.Join(fileFactories, ", ")+"])\n        MobileComponentExtensions.install(["+strings.Join(componentFactories, ", ")+"])\n    }\n}\n"))
 	}); err != nil {
 		return nil, err
 	}

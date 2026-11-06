@@ -1,0 +1,22 @@
+package adapter
+
+import (
+	"testing"
+
+	"github.com/DonaldMurillo/gofastr-native/extension"
+	"github.com/DonaldMurillo/gofastr-native/extension/webassets"
+)
+
+func TestLibraryContract(t *testing.T) {
+	definition := Definition()
+	registry, err := extension.New(definition)
+	if err != nil { t.Fatal(err) }
+	if _, err := webassets.Module(definition); err != nil { t.Fatal(err) }
+	component, err := Block("summary", Content{Text: "Library-owned text"})
+	if err != nil { t.Fatal(err) }
+	if err := registry.ValidateComponent(component); err != nil { t.Fatal(err) }
+	component.Destinations = map[string]string{"unexpected": "/"}
+	if err := registry.ValidateComponent(component); err == nil { t.Fatal("accepted undeclared navigation") }
+	if _, err := Block("summary", Content{}); err == nil { t.Fatal("accepted empty text") }
+	if definition.Validate != nil || definition.Accept != nil { t.Fatal("component must not register acquisition callbacks") }
+}

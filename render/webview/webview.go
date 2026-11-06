@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/DonaldMurillo/gofastr-native/extension"
 	"github.com/DonaldMurillo/gofastr-native/extension/webassets"
 
 	"github.com/DonaldMurillo/gofastr-native/mobileui"
@@ -47,6 +48,9 @@ var filesAdapter string
 //go:embed components.js
 var componentsAdapter string
 
+//go:embed rendering.js
+var renderingAdapter string
+
 //go:embed foreground.js
 var foregroundAdapter string
 
@@ -65,20 +69,22 @@ var rendererServices = registry.RegisterBehavior("gfm-webview-services", service
 var rendererLive = registry.RegisterBehavior("gfm-webview-live", liveAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires("gfm-webview-components"))
 var rendererLifecycle = registry.RegisterBehavior("gfm-webview-lifecycle", lifecycleAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires(headless.LeaveGuardBehaviorName))
 var rendererComponents = registry.RegisterBehavior("gfm-webview-components", componentsAdapter, registry.Markers("[data-gfw-screen]"))
+var rendererRendering = registry.RegisterBehavior("gfm-webview-rendering", renderingAdapter, registry.Markers("[data-gfw-screen]"))
 var rendererFiles = registry.RegisterBehavior("gfm-webview-files", filesAdapter, registry.Markers("[data-gfw-screen]"),
 	registry.Requires("gfm-webview-foreground"))
 var rendererPresentation = registry.RegisterBehavior("gfm-webview-presentation", presentationAdapter, registry.Markers("[data-gfw-screen]"), registry.Requires("gfm-webview-foreground"))
 var rendererBehavior = registry.RegisterBehavior("gfm-webview", behavior, registry.Markers("[data-gfw-screen]"),
-	registry.Requires(headless.LeaveGuardBehaviorName, "gfm-webview-presentation", "gfm-webview-files", "gfm-webview-components", "gfm-webview-services", "gfm-webview-live", "gfm-webview-lifecycle"),
+	registry.Requires(headless.LeaveGuardBehaviorName, "gfm-webview-presentation", "gfm-webview-files", "gfm-webview-components", "gfm-webview-rendering", "gfm-webview-services", "gfm-webview-live", "gfm-webview-lifecycle"),
 	registry.Interactions(registry.Interaction{Event: "click", Selector: "[data-gfw-screen] [form=\"gfw-form\"]"}))
 
 // Renderer adapts an immutable registry to the existing GoFastr web host.
 type Renderer struct {
-	screens    *nativeui.App
-	platform   mobileui.Platform
-	host       *uihost.UIHost
-	runtime    *nativeui.Runtime
-	extensions []string
+	screens             *nativeui.App
+	platform            mobileui.Platform
+	host                *uihost.UIHost
+	runtime             *nativeui.Runtime
+	extensions          []string
+	componentExtensions []string
 }
 
 // New creates an SSR host without mounting routes or invoking screen handlers.
@@ -110,6 +116,9 @@ func New(screens *nativeui.App, platform mobileui.Platform, options ...nativeui.
 			return nil, err
 		}
 		renderer.extensions = append(renderer.extensions, name)
+		if definition.Manifest.Kind == extension.ComponentKind {
+			renderer.componentExtensions = append(renderer.componentExtensions, definition.Manifest.Name)
+		}
 	}
 	site := appui.NewApp("Mobile")
 	site.WithTheme(mobileui.Theme(platform))
@@ -184,21 +193,30 @@ func (screen *pageScreen) RenderCtx(ctx context.Context) render.HTML {
 }
 
 type clientConfig struct {
-	Extensions    []string             `json:"extensions,omitempty"`
-	DefaultAction string               `json:"defaultAction,omitempty"`
-	Committed     bool                 `json:"committed,omitempty"`
-	Root          string               `json:"root"`
-	Route         string               `json:"route"`
-	Routes        []nativeui.RouteInfo `json:"routes"`
-	Draft         *nativeui.Draft      `json:"draft,omitempty"`
-	List          *nativeui.List       `json:"list,omitempty"`
-	Tabs          []nativeui.Tab       `json:"tabs,omitempty"`
-	ActiveTab     string               `json:"activeTab,omitempty"`
-	Live          *nativeui.Live       `json:"live,omitempty"`
+	Extensions          []string              `json:"extensions,omitempty"`
+	ComponentExtensions []string              `json:"componentExtensions,omitempty"`
+	Components          []extension.Component `json:"components,omitempty"`
+	DefaultAction       string                `json:"defaultAction,omitempty"`
+	Committed           bool                  `json:"committed,omitempty"`
+	Root                string                `json:"root"`
+	Route               string                `json:"route"`
+	Routes              []nativeui.RouteInfo  `json:"routes"`
+	Draft               *nativeui.Draft       `json:"draft,omitempty"`
+	List                *nativeui.List        `json:"list,omitempty"`
+	Tabs                []nativeui.Tab        `json:"tabs,omitempty"`
+	ActiveTab           string                `json:"activeTab,omitempty"`
+	Live                *nativeui.Live        `json:"live,omitempty"`
 }
 
 func (renderer *Renderer) markup(ctx context.Context, screen nativeui.Screen, failure *nativeui.ActionError, effects *nativeui.Result) render.HTML {
 	page := mobileui.Page{Platform: renderer.platform, Title: screen.Title, Subtitle: screen.Prompt, Editor: !screen.LargeTitle}
+	var images, attachments render.HTML
+	if len(screen.Components) == 0 || len(screen.Images) != 0 {
+		images = imageGallery(screen.Images)
+	}
+	if len(screen.Components) == 0 || len(screen.Attachments) != 0 {
+		attachments = attachmentList(screen.Attachments)
+	}
 	tabRoot := false
 	for _, tab := range screen.Tabs {
 		if strings.Split(screen.Route, "?")[0] == strings.Split(tab.Route, "?")[0] {
@@ -244,7 +262,8 @@ func (renderer *Renderer) markup(ctx context.Context, screen nativeui.Screen, fa
 		}
 	}
 	config := clientConfig{Root: renderer.screens.Root(), Route: screen.Route, Routes: renderer.screens.Routes(),
-		List: screen.List, Tabs: screen.Tabs, ActiveTab: screen.ActiveTab, Live: screen.Live, Extensions: renderer.extensions}
+		List: screen.List, Tabs: screen.Tabs, ActiveTab: screen.ActiveTab, Live: screen.Live, Extensions: renderer.extensions,
+		ComponentExtensions: renderer.componentExtensions, Components: screen.Components}
 	if primary >= 0 {
 		config.DefaultAction = screen.Actions[primary].ID
 	}
@@ -315,8 +334,8 @@ func (renderer *Renderer) markup(ctx context.Context, screen nativeui.Screen, fa
 		}
 	}
 	if screen.Form != nil {
-		controls = append(controls, imageGallery(screen.Images))
-		controls = append(controls, attachmentList(screen.Attachments))
+		controls = append(controls, images, attachments)
+		controls = append(controls, componentMarkup(screen.Components))
 		if len(details) != 0 {
 			heading := screen.Form.DetailsTitle
 			if heading == "" {
@@ -348,8 +367,7 @@ func (renderer *Renderer) markup(ctx context.Context, screen nativeui.Screen, fa
 		content = append(content, listMarkup(screen, failure))
 	}
 	if screen.Text != "" {
-		content = append(content, imageGallery(screen.Images))
-		content = append(content, attachmentList(screen.Attachments))
+		content = append(content, images, attachments)
 		content = append(content, render.Tag("div", map[string]string{"class": "gfw-text"}, render.Text(screen.Text)))
 	}
 	if preview := screen.FilePreview; preview != nil {
@@ -357,7 +375,7 @@ func (renderer *Renderer) markup(ctx context.Context, screen nativeui.Screen, fa
 			render.Tag("h1", nil, render.Text(preview.File.Name)),
 			render.Tag("p", map[string]string{"class": "gfw-file-description"}, render.Text(nativeui.FileDescription(preview.File.MediaType, preview.File.Size))),
 			render.Tag("p", map[string]string{"class": "gfw-file-caption"}, render.Text(preview.Caption)))
-		parts := []render.HTML{header, imageGallery(screen.Images), attachmentList(screen.Attachments)}
+		parts := []render.HTML{header, images, attachments}
 		if preview.Text != "" {
 			parts = append(parts, render.Tag("section", map[string]string{"class": "gfw-file-text"},
 				render.Tag("h2", nil, render.Text(preview.PreviewTitle)), render.Tag("pre", nil, render.Text(preview.Text))))
@@ -365,7 +383,10 @@ func (renderer *Renderer) markup(ctx context.Context, screen nativeui.Screen, fa
 		content = append(content, render.Tag("article", map[string]string{"class": "gfw-file-preview", "data-gfw-file-preview": ""}, parts...))
 	}
 	if screen.List != nil {
-		content = append(content, imageGallery(screen.Images))
+		content = append(content, images)
+	}
+	if screen.Form == nil {
+		content = append(content, componentMarkup(screen.Components))
 	}
 	shareAttrs := map[string]string{"class": "gfw-share", "data-gfw-share": ""}
 	if shareText == "" {
@@ -387,6 +408,15 @@ func (renderer *Renderer) markup(ctx context.Context, screen nativeui.Screen, fa
 
 func hidden(name, value string) render.HTML {
 	return render.VoidTag("input", map[string]string{"type": "hidden", "name": name, "value": value})
+}
+
+func componentMarkup(components []extension.Component) render.HTML {
+	children := make([]render.HTML, 0, len(components))
+	for _, snapshot := range components {
+		children = append(children, render.Tag("div", map[string]string{"data-gfw-component": snapshot.ID,
+			"data-gfw-component-name": snapshot.Name}, render.Text("Loading component…")))
+	}
+	return render.Tag("div", map[string]string{"data-gfw-components": ""}, children...)
 }
 
 func attachmentList(attachments []nativeui.Attachment) render.HTML {

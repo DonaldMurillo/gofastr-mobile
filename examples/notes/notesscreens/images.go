@@ -5,8 +5,21 @@ import (
 	"errors"
 
 	"github.com/DonaldMurillo/gofastr-native/device/files"
+	"github.com/DonaldMurillo/gofastr-native/extension"
+	"github.com/DonaldMurillo/gofastr-native/extensions/media"
 	"github.com/DonaldMurillo/gofastr-native/nativeui"
 )
+
+func mediaComponents(images []nativeui.Image, attachments []nativeui.Attachment, preview *nativeui.FilePreview) ([]extension.Component, error) {
+	if len(images)+len(attachments) == 0 && preview == nil {
+		return nil, nil
+	}
+	component, err := media.Block("note-media", media.Content{Images: images, Attachments: attachments, Preview: preview})
+	if err != nil {
+		return nil, err
+	}
+	return []extension.Component{component}, nil
+}
 
 func noteMedia(ctx context.Context, store *files.Store, noteID string) ([]nativeui.Image, []nativeui.Attachment, error) {
 	if store == nil || noteID == "" {

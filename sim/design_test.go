@@ -3,12 +3,15 @@ package sim
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +23,7 @@ import (
 	"github.com/DonaldMurillo/gofastr/framework/localapp"
 	"github.com/DonaldMurillo/gofastr/framework/owner"
 	"github.com/chromedp/cdproto/emulation"
+	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -85,9 +89,35 @@ func TestNotesVisualHierarchyWebView(t *testing.T) {
 					check := deviceBrowserCheck(t, ctx)
 					shot := func(name string) chromedp.Action {
 						return chromedp.ActionFunc(func(ctx context.Context) error {
+							var photoRect []float64
+							if strings.HasPrefix(name, "photo-detail-") {
+								if err := chromedp.Evaluate(`(async () => {
+									const photo = document.querySelector('[data-gfw-file-preview] img');
+									await photo.decode();
+									await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+									const rect = photo.getBoundingClientRect();
+									return [rect.x, rect.y, rect.width, rect.height, innerWidth];
+								})()`, &photoRect, func(parameters *cdpruntime.EvaluateParams) *cdpruntime.EvaluateParams {
+									return parameters.WithAwaitPromise(true)
+								}).Do(ctx); err != nil {
+									return err
+								}
+							}
 							var pixels []byte
 							if err := chromedp.CaptureScreenshot(&pixels).Do(ctx); err != nil {
 								return err
+							}
+							if len(photoRect) != 0 {
+								preview, err := png.Decode(bytes.NewReader(pixels))
+								if err != nil {
+									return err
+								}
+								scale := float64(preview.Bounds().Dx()) / photoRect[4]
+								point := image.Pt(int((photoRect[0]+photoRect[2]/2)*scale), int((photoRect[1]+photoRect[3]/4)*scale))
+								actual := color.NRGBAModel.Convert(preview.At(point.X, point.Y)).(color.NRGBA)
+								if photoRect[2] < 100 || photoRect[3] < 100 || actual.R < 157 || actual.R > 173 || actual.G < 180 || actual.G > 196 || actual.B < 179 || actual.B > 195 {
+									return fmt.Errorf("photo must be painted in the detail preview: rect=%v, pixel=%v", photoRect, actual)
+								}
 							}
 							return os.WriteFile(filepath.Join(shotsDir(t), string(platform)+"-design-"+name+".png"), pixels, 0600)
 						})

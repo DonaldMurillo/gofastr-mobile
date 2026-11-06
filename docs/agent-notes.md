@@ -1,5 +1,39 @@
 # Implementation notes
 
+## 2026-11-06 - Keep validation local, without CI
+- Scope: build, tooling, terminal.
+- Trigger: repository policy excludes CI; the desktop Notes command also cannot link as a CGO-disabled iOS executable.
+- Approach: keep no CI workflows; run Go tests/vet, Node tests and mobile-library cross-builds locally.
+- Evidence: README documents local commands; `go list -f '{{if ne .Name "main"}}{{.ImportPath}}{{end}}' ./mobilehost/... ./examples/...` selects portable library packages.
+- Next time: do not add CI; validate the public pin locally, leave executable checks to gomobile, and keep generated app bundles outside Git.
+- Status: active.
+
+## 2026-11-05 - Rendering extensions use keyed snapshots, not another command loop
+- Scope: extensions, nativeui, Notes, UIKit, WebView.
+- Trigger: file acquisition proved package ownership but did not let libraries render screen content.
+- Approach: `Screen.Components` carries bounded library payloads and an opaque destination map; per-app validation checks identity, routes and mandatory renderer support. Notes uses `extensions/media` instead of legacy media slots.
+- Evidence: `go test ./extension/... ./nativeui ./extensions/media ./examples/notes/...` covers strict policy, component-only screens, missing adapters and actual Notes attachment wire/persistence.
+- Next time: reconcile by component ID, retain dirty form/IME state, and route only declared event keys through existing guards. Keep derived attachment metadata round-trippable and reject forged `icon`/`detail` fields.
+- Details: [rendering extensions](rendering-extensions.md); physical-device acceptance remains a separate gate.
+- Status: active.
+
+## 2026-11-05 - Keep native build, launch and interaction evidence separate
+- Scope: UIKit, simulator, acceptance.
+- Trigger: the fresh compiled-component app built and launched, but computer-use failed with `Sky Computer Use native pipe startup failed`.
+- Approach: install over `dev.gofastr.designqa` without wiping data; use a simulator capture to verify startup and record interactive workflows as NOT RUN.
+- Evidence: full Go tests/vet, 143 Node tests, targeted race/public-pin suites, optimized gomobile/UIKit build and `simctl launch` pass; device doctor correctly fails unavailable hardware.
+- Next time: retry native workflow acceptance only with a working UI control surface; never promote compilation, a launch screenshot or cached device records to provider/VoiceOver/IME acceptance.
+- Details: [rendering verification](rendering-extensions.md#local-validation--november-5-2026); [physical gate](ios-device-acceptance.md).
+- Status: active.
+
+## 2026-11-05 - Decoded image dimensions do not prove painted previews
+- Scope: WebView, rendering extensions, visual acceptance.
+- Trigger: the photo-detail screenshot was blank even though Chromium reported the expected `naturalWidth`.
+- Approach: await `img.decode()` and animation frames, then sample the fixture's actual screenshot pixels and require usable dimensions.
+- Evidence: `SIM_SHOTS=/tmp/gfn-component-shots go test ./sim -run TestNotesVisualHierarchyWebView -count=1` passes both styles and schemes, including painted photo details.
+- Next time: inspect saved screenshots and preserve detail-gallery containment; do not substitute DOM presence or image metadata for visible content.
+- Status: active.
+
 ## 2026-11-05 - Compiled adapters register before host manifests seal
 - Scope: extensions, packaging, webview, UIKit.
 - Trigger: registering extension JS in `webview.New` panicked when a legacy host had already sealed GoFastr's registry.
@@ -19,7 +53,7 @@
 
 ## 2026-11-05 - Rename branding without renaming compatibility contracts
 - Scope: repository, module, cli, compatibility.
-- Approach: use `github.com/DonaldMurillo/gofastr-native`, `cmd/gofastr-native`, and matching CI/docs; retain mobile package names, bridge hello/path, simulator debug variables, app IDs, and data locations.
+- Approach: use `github.com/DonaldMurillo/gofastr-native`, `cmd/gofastr-native`, and matching docs; retain mobile package names, bridge hello/path, simulator debug variables, app IDs, and data locations.
 - Evidence: [rename migration](project-rename.md), CLI help/dry-run checks, 127 Node tests, fresh complete workspace/public-pin Go suites and vet, and a full UIKit simulator build/install preserving its notes. Earlier stage 8 timeouts did not recur after the separately proven stage 11 menu fix.
 - Next time: treat repository/module/CLI names separately from wire/storage identity; check both workspace and public-pin builds after import changes. A repository rename does not publish uncommitted source.
 - Status: active; native Android stays deferred and WebView stays supported.

@@ -1,0 +1,55 @@
+// Package adapter provides a compiled, bounded read-only text rendering component.
+package adapter
+
+import (
+	"embed"
+	"encoding/json"
+	"errors"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/DonaldMurillo/gofastr-native/behavior"
+	"github.com/DonaldMurillo/gofastr-native/extension"
+	"github.com/DonaldMurillo/gofastr-native/extension/webassets"
+)
+
+//go:embed gofastr-native.extension.json Adapter.swift adapter.js
+var assets embed.FS
+
+const Name = {{.Name}}
+
+type Content struct { Text string `json:"text"` }
+
+func init() { webassets.Register(Definition()) }
+
+// Block creates a stable, read-only component snapshot. It does not navigate or write data.
+func Block(id string, content Content) (extension.Component, error) {
+	if !utf8.ValidString(content.Text) { return extension.Component{}, errors.New("adapter: invalid UTF-8 text") }
+	payload, err := json.Marshal(content)
+	if err != nil { return extension.Component{}, err }
+	component := extension.Component{ID: id, Name: Name, Payload: string(payload)}
+	if err := validate(component); err != nil { return extension.Component{}, err }
+	return component, nil
+}
+
+func validate(component extension.Component) error {
+	if component.Name != Name || !behavior.SafeToken(component.ID) || len(component.Destinations) != 0 {
+		return errors.New("adapter: invalid read-only component identity or destinations")
+	}
+	var content Content
+	if err := extension.DecodeComponent(component.Payload, &content); err != nil { return err }
+	if len(content.Text) > 8192 || strings.TrimSpace(content.Text) == "" || !utf8.ValidString(content.Text) || strings.ContainsRune(content.Text, 0) {
+		return errors.New("adapter: expected nonempty UTF-8 text up to 8192 bytes without NUL")
+	}
+	return nil
+}
+
+// Definition provides static assets and the authoritative read-only content validator.
+// Importing publishes assets; each application must still explicitly select this definition.
+func Definition() extension.Definition {
+	content, err := assets.ReadFile(extension.ManifestName)
+	if err != nil { panic(err) }
+	manifest, err := extension.ParseManifest(content)
+	if err != nil { panic(err) }
+	return extension.Definition{Manifest: manifest, Assets: assets, ValidateComponent: validate}
+}

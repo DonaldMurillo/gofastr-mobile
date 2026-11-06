@@ -18,7 +18,7 @@ func TestCompiledExtensionDiscoveryAndPackaging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(definitions) != 1 || definitions[0].manifest.Name != "gofastr.photos/v1" {
+	if len(definitions) != 2 || definitions[0].manifest.Name != "gofastr.media/v1" || definitions[0].manifest.Kind != extension.ComponentKind || definitions[1].manifest.Name != "gofastr.photos/v1" {
 		t.Fatalf("unexpected compiled imports: %+v", definitions)
 	}
 	application := nativeApp(t)
@@ -28,25 +28,27 @@ func TestCompiledExtensionDiscoveryAndPackaging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range definitions[0].manifest.IOS.Sources {
-		original, err := extensionAsset(definitions[0].directory, name, 512*1024)
-		if err != nil {
-			t.Fatal(err)
-		}
-		found := false
-		for _, path := range sources {
-			content, _ := os.ReadFile(path)
-			if bytes.Equal(content, original) {
-				found = true
-				break
+	for _, definition := range definitions {
+		for _, name := range definition.manifest.IOS.Sources {
+			original, err := extensionAsset(definition.directory, name, 512*1024)
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-		if !found {
-			t.Fatalf("extension asset %s was not compiled verbatim", name)
+			found := false
+			for _, path := range sources {
+				content, _ := os.ReadFile(path)
+				if bytes.Equal(content, original) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("extension asset %s was not compiled verbatim", name)
+			}
 		}
 	}
 	catalog, err := os.ReadFile(filepath.Join(directory, "renderer", "GofastrCompiledExtensions.swift"))
-	if err != nil || !bytes.Contains(catalog, []byte("MobileFileExtensions.install([GofastrPhotoExtension.self])")) || !bytes.Contains(catalog, []byte(`GofastrPhotoExtension.name == "gofastr.photos/v1"`)) {
+	if err != nil || !bytes.Contains(catalog, []byte("MobileFileExtensions.install([GofastrPhotoExtension.self])")) || !bytes.Contains(catalog, []byte("MobileComponentExtensions.install([GofastrMediaComponent.self])")) || !bytes.Contains(catalog, []byte(`GofastrPhotoExtension.name == "gofastr.photos/v1"`)) {
 		t.Fatalf("catalog: %s %v", catalog, err)
 	}
 	bootstrap, _ := os.ReadFile(sources[0])

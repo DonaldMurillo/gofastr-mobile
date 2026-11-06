@@ -34,7 +34,7 @@ func New(root string, routes ...Route) (*App, error) {
 	return NewWithExtensions(root, nil, routes...)
 }
 
-// NewWithExtensions explicitly enables compiled file-acquisition adapters.
+// NewWithExtensions explicitly enables compiled acquisition and rendering adapters.
 func NewWithExtensions(root string, definitions []extension.Definition, routes ...Route) (*App, error) {
 	extensions, err := extension.New(definitions...)
 	if err != nil {
@@ -42,7 +42,7 @@ func NewWithExtensions(root string, definitions []extension.Definition, routes .
 	}
 	for _, definition := range extensions.Definitions() {
 		for _, capability := range definition.Manifest.Capabilities {
-			if knownCapability(Capability(capability)) && capability != string(CapabilityPhotos) && capability != string(CapabilityCamera) {
+			if knownCapability(Capability(capability)) && (definition.Manifest.Kind == extension.ComponentKind || capability != string(CapabilityPhotos) && capability != string(CapabilityCamera)) {
 				return nil, fmt.Errorf("nativeui: extension cannot replace core capability %q", capability)
 			}
 		}
@@ -322,6 +322,9 @@ func (app *App) Render(ctx context.Context, destination string, values map[strin
 			}
 		}
 	}
+	if err := app.validateRenderingComponents(&screen); err != nil {
+		return Screen{}, err
+	}
 	if err := app.validateTabs(screen); err != nil {
 		return Screen{}, err
 	}
@@ -472,6 +475,9 @@ func validateScreen(screen Screen, actions map[string]Handle) error {
 		if err := validateFilePreview(*screen.FilePreview); err != nil {
 			return err
 		}
+	}
+	if content == 0 && len(screen.Components) != 0 {
+		content++
 	}
 	if content != 1 || screen.Title == "" {
 		return errors.New("nativeui: screen requires a title and one content kind")

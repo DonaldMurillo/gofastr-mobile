@@ -1,4 +1,4 @@
-// Package extension defines compiled, versioned file-acquisition extensions.
+// Package extension defines compiled, versioned mobile renderer extensions.
 package extension
 
 import (
@@ -19,6 +19,15 @@ import (
 const ManifestName = "gofastr-native.extension.json"
 const MaxPayload = 8192
 
+const MaxComponentPayload = 2 << 20
+
+type Kind string
+
+const (
+	FileKind      Kind = "file"
+	ComponentKind Kind = "component"
+)
+
 var namePattern = regexp.MustCompile(`^[a-z][a-z0-9.-]{0,79}/v[1-9][0-9]{0,2}$`)
 var factoryPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,99}$`)
 
@@ -32,6 +41,7 @@ type FileOperation struct {
 // Manifest identifies library-owned adapters compiled into the application.
 type Manifest struct {
 	Name         string   `json:"name"`
+	Kind         Kind     `json:"kind,omitempty"`
 	Capabilities []string `json:"capabilities"`
 	IOS          IOS      `json:"ios"`
 	WebView      WebView  `json:"webview"`
@@ -51,15 +61,20 @@ type WebView struct {
 // Definition binds typed request/result validation to bundled renderer assets.
 // Validate returns one of the manifest's capabilities for this request.
 type Definition struct {
-	Manifest Manifest
-	Assets   fs.ReadFileFS
-	Validate func(FileOperation) (string, error)
-	Accept   func(FileOperation, files.Document) error
+	Manifest          Manifest
+	Assets            fs.ReadFileFS
+	Validate          func(FileOperation) (string, error)
+	Accept            func(FileOperation, files.Document) error
+	ValidateComponent func(Component) error
 }
 
 // Decode rejects unknown fields and extra JSON values in a bounded payload.
 func Decode(payload string, target any) error {
-	if len(payload) == 0 || len(payload) > MaxPayload {
+	return decode(payload, target, MaxPayload)
+}
+
+func decode(payload string, target any, maximum int) error {
+	if len(payload) == 0 || len(payload) > maximum {
 		return errors.New("extension: invalid payload size")
 	}
 	decoder := json.NewDecoder(strings.NewReader(payload))
@@ -83,6 +98,12 @@ func ParseManifest(content []byte) (Manifest, error) {
 
 // Validate checks names and package-relative asset paths, not OS permissions.
 func (manifest Manifest) Validate() error {
+	if manifest.Kind != "" && manifest.Kind != FileKind && manifest.Kind != ComponentKind {
+		return errors.New("extension: unknown adapter kind")
+	}
+	if manifest.Kind == ComponentKind && (len(manifest.Capabilities) != 1 || manifest.Capabilities[0] != manifest.Name) {
+		return errors.New("extension: components must declare their namespaced rendering capability")
+	}
 	if !namePattern.MatchString(manifest.Name) || len(manifest.Capabilities) == 0 || len(manifest.Capabilities) > 8 ||
 		!factoryPattern.MatchString(manifest.IOS.Factory) || len(manifest.IOS.Sources) == 0 || len(manifest.IOS.Sources) > 16 {
 		return errors.New("extension: invalid manifest")
@@ -130,7 +151,10 @@ func New(definitions ...Definition) (*Registry, error) {
 		if err := manifest.Validate(); err != nil {
 			return nil, err
 		}
-		if registry.definitions[manifest.Name].Validate != nil || definition.Assets == nil || definition.Validate == nil || definition.Accept == nil {
+		_, duplicate := registry.definitions[manifest.Name]
+		if duplicate || definition.Assets == nil ||
+			(manifest.Kind == ComponentKind && (definition.ValidateComponent == nil || definition.Validate != nil || definition.Accept != nil)) ||
+			(manifest.Kind != ComponentKind && (definition.Validate == nil || definition.Accept == nil || definition.ValidateComponent != nil)) {
 			return nil, errors.New("extension: duplicate or incomplete definition")
 		}
 		for _, capability := range manifest.Capabilities {
@@ -228,7 +252,7 @@ func (registry *Registry) Allows(capability string) bool {
 
 func (registry *Registry) Validate(operation FileOperation) (string, error) {
 	definition, exists := registry.definitions[operation.Name]
-	if !exists || len(operation.Payload) == 0 || len(operation.Payload) > MaxPayload || !json.Valid([]byte(operation.Payload)) {
+	if !exists || definition.Manifest.Kind == ComponentKind || len(operation.Payload) == 0 || len(operation.Payload) > MaxPayload || !json.Valid([]byte(operation.Payload)) {
 		return "", errors.New("extension: unregistered operation or invalid payload")
 	}
 	capability, err := definition.Validate(operation)

@@ -22,6 +22,7 @@ func servicesHello(t *testing.T) string {
 		nativeui.CapabilityPhotos:       nativeui.SupportAvailable, nativeui.CapabilitySharing: nativeui.SupportAvailable,
 		nativeui.CapabilityClipboard: nativeui.SupportAvailable, nativeui.CapabilityNotifications: nativeui.SupportAvailable,
 		nativeui.CapabilityAudio: nativeui.SupportAvailable, nativeui.CapabilityLive: nativeui.SupportAvailable,
+		"gofastr.media/v1": nativeui.SupportAvailable,
 	}}})
 	if reply.Error != nil {
 		t.Fatal(reply.Error)
@@ -255,10 +256,10 @@ func TestNotesRecordingValidatesPersistsReopensPlaysAndSharesWithoutSavingDraft(
 	}
 	connection = servicesHello(t)
 	detail := showcaseCommand(t, nativeui.Command{Kind: "open", Connection: connection, Route: attachmentRoute})
-	if detail.Error != nil || len(detail.Screen.Attachments) != 1 || detail.Screen.Attachments[0].Audio == nil {
+	if detail.Error != nil || len(screenMedia(t, detail.Screen).Attachments) != 1 || screenMedia(t, detail.Screen).Attachments[0].Audio == nil {
 		t.Fatalf("no persisted playback: %+v", detail)
 	}
-	playback := detail.Screen.Attachments[0].Audio
+	playback := screenMedia(t, detail.Screen).Attachments[0].Audio
 	if playback.DurationMillis != 1 || !bytes.Equal(playback.File.Data, document.Data) || playback.File.MediaType != "audio/wav" {
 		t.Fatal("duration or audio bytes did not survive restart")
 	}

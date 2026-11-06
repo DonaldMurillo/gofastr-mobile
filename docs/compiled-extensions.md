@@ -1,13 +1,16 @@
-# Compiled extensions: photo acquisition pilot
+# Compiled acquisition and rendering extensions
 
 Applications still author Go screens, actions, and typed services. Extension
 **library authors**, not application authors, own platform adapter source. Nothing
 is downloaded as executable presentation code, and GoFastr core is unchanged.
 
-This first seam extends **bounded file acquisition**. It is not yet arbitrary
-screen/component registration, arbitrary service results, desktop/TUI rendering,
-a plugin marketplace, or a stable binary ABI. It proves package ownership and
-registration before broadening those contracts.
+There are now two explicit contracts: **bounded file acquisition** and **keyed
+rendering components**. The photo library exercises acquisition; the media
+library owns Notes attachment rendering on UIKit and WebView. See
+[rendering extensions](rendering-extensions.md) for the component API and
+[extension tooling](extension-tooling.md) for authoring and checks. Arbitrary
+service results, desktop/TUI rendering, a marketplace and a stable binary ABI
+are not implemented.
 
 ## Application API
 

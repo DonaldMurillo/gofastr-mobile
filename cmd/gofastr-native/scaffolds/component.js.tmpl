@@ -1,0 +1,27 @@
+(() => {
+  'use strict';
+  const name = {{.Name}};
+  (window.__gofastr_component_extension_definitions ||= []).push({
+    name,
+    capabilities: () => ({ [name]: 'available' }),
+    mount(container, component, host) {
+      let disposed = false;
+      const paragraph = document.createElement('p');
+      paragraph.style.whiteSpace = 'pre-wrap';
+      paragraph.style.overflowWrap = 'anywhere';
+      paragraph.style.font = 'inherit';
+      const update = next => {
+        if (disposed) return;
+        if (next.name !== name || Object.keys(next.destinations || {}).length !== 0 ||
+            typeof next.payload !== 'string' || new TextEncoder().encode(next.payload).length > 2097152) throw new Error('Invalid component');
+        const content = JSON.parse(next.payload);
+        if (!content || Object.keys(content).length !== 1 || typeof content.text !== 'string' ||
+            !content.text.trim() || content.text.includes('\0') || new TextEncoder().encode(content.text).length > 8192) throw new Error('Invalid text');
+        paragraph.textContent = content.text;
+      };
+      update(component);
+      container.replaceChildren(paragraph);
+      return { update, dispose() { if (!disposed) { disposed = true; container.replaceChildren(); } } };
+    },
+  });
+})();

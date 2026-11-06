@@ -180,7 +180,7 @@ func TestSoftTrashConfirmationKeepsAttachmentsAndCanRestore(t *testing.T) {
 		t.Fatalf("trash leaked into active notes: %+v, %v", active, err)
 	}
 	attachment := showcaseCommand(t, nativeui.Command{Kind: "open", Connection: connection, Route: attachmentRoute})
-	if attachment.Error != nil || attachment.Screen.FilePreview == nil || !strings.Contains(attachment.Screen.FilePreview.Text, "Still here after trash") {
+	if attachment.Error != nil || screenMedia(t, attachment.Screen).Preview == nil || !strings.Contains(screenMedia(t, attachment.Screen).Preview.Text, "Still here after trash") {
 		t.Fatalf("soft trash erased attachment: %+v", attachment)
 	}
 	trash := showcaseCommand(t, nativeui.Command{Kind: "open", Connection: connection, Route: "/notes?view=trash"})

@@ -58,6 +58,7 @@ struct MobileScreen: Decodable {
     let filePreview: MobileFilePreview?
     var images: [MobileImage]?
     var attachments: [MobileAttachment]?
+    var components: [MobileComponent]?
     let tabs: [MobileTab]?
     let activeTab: String?
     let requires: [MobileRequirement]?
@@ -229,6 +230,7 @@ final class MobileHost {
             "presentation/v1": "available", "files/v1": "available", "live/v1": "available"
         ].merging(GofastrServiceRunner.capabilities()) { _, service in service }
             .merging(MobileFileExtensions.capabilities()) { _, service in service }
+            .merging(MobileComponentExtensions.capabilities()) { _, service in service }
         command(["kind": "hello", "hello": ["minimum": 1, "maximum": 1, "renderer": "uikit", "capabilities": capabilities]]) { result in
             if case .success(let reply) = result { self.connection = reply.connection ?? "" }
             completion(result)
@@ -491,6 +493,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     private var contentScroll: UIScrollView?
     private var imageGallery: MobileImageGallery?
     private var attachmentList: MobileAttachmentList?
+    private var componentViews: MobileComponentViews?
     private var fieldErrors: [String: UILabel] = [:]
     private var detailsGroup: MobileDisclosureGroup?
     private var listQuery: [String: String] = [:]
@@ -545,11 +548,13 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         else if let form = screen.form { buildForm(form) }
         else if let preview = screen.filePreview { buildFilePreview(preview) }
         else if let content = screen.text { buildText(content) }
+        else if screen.components?.isEmpty == false { buildText("") }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         liveReadRecovery.reset()
+        componentViews?.activate(screen.components ?? [])
         if appeared && screen.list != nil && (!skipRefreshOnAppear || listNeedsRefresh || renderedMutationRevision != host.mutationRevision) { refresh() }
         else if appeared { refreshImages() }
         skipRefreshOnAppear = false
@@ -576,6 +581,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         liveVisible = false
         cancelWatch()
         attachmentList?.stop()
+        componentViews?.dispose()
         pendingSearch?.cancel()
         pendingCheckpoint?.cancel()
         revision += 1
@@ -648,23 +654,24 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         view.addSubview(table)
         NSLayoutConstraint.activate([table.topAnchor.constraint(equalTo: view.topAnchor), table.bottomAnchor.constraint(equalTo: view.bottomAnchor), table.leadingAnchor.constraint(equalTo: view.leadingAnchor), table.trailingAnchor.constraint(equalTo: view.trailingAnchor)])
         self.table = table
+        let header = UIStackView()
+        header.axis = .vertical
+        header.spacing = 10
+        header.isLayoutMarginsRelativeArrangement = true
+        header.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20)
+        addComponents(to: header)
         if let filters = list.filters, !filters.isEmpty {
-            let header = UIStackView()
-            header.axis = .vertical
-            header.spacing = 10
-            header.isLayoutMarginsRelativeArrangement = true
-            header.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20)
             let disclosure = MobileDisclosureGroup("Filters", identifier: "native.filters")
             disclosure.layoutChanged = { [weak self] in self?.sizeListHeader() }
             for field in filters { addField(field, to: disclosure.content, filter: true) }
             header.addArrangedSubview(disclosure)
             configureStatus()
             header.addArrangedSubview(status)
-            filterHeader = header
-            table.tableHeaderView = header
         } else {
             configureStatus()
         }
+        filterHeader = header
+        table.tableHeaderView = header
         if list.refreshable == true {
             table.refreshControl = UIRefreshControl()
             table.refreshControl?.addTarget(self, action: #selector(refresh), for: .valueChanged)
@@ -685,6 +692,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func showList() {
+        componentViews?.reconcile(screen.components ?? [])
         let footer = UIStackView()
         footer.axis = .vertical
         footer.spacing = 8
@@ -757,8 +765,12 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
 
     private func sizeListHeader() {
         guard let table, let header = filterHeader, table.bounds.width > 0 else { return }
+        guard header.arrangedSubviews.contains(where: { !$0.isHidden }) else {
+            if table.tableHeaderView === header { table.tableHeaderView = nil }
+            return
+        }
         let size = header.systemLayoutSizeFitting(CGSize(width: table.bounds.width, height: 0), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
-        if header.frame.width != table.bounds.width || abs(header.frame.height - size.height) > 0.5 {
+        if table.tableHeaderView !== header || header.frame.width != table.bounds.width || abs(header.frame.height - size.height) > 0.5 {
             header.frame = CGRect(x: 0, y: 0, width: table.bounds.width, height: size.height)
             table.tableHeaderView = header
         }
@@ -1126,8 +1138,8 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? { swipeActions(indexPath, leading: true) }
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? { swipeActions(indexPath, leading: false) }
 
-    private func openDestination(_ destination: String) {
-        guard !navigationBlocked else { return }
+    private func openDestination(_ destination: String, stillValid: @escaping () -> Bool = { true }) {
+        guard !navigationBlocked, stillValid() else { return }
         guard editor?.pending != true, editor?.unknown != true else {
             status.text = "Finish the pending or unconfirmed save before opening an attachment. Your text is still here."
             return
@@ -1139,15 +1151,15 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
             checkpointEditor { [weak self] stored in
                 guard let self else { return }
                 self.setBusy(false)
-                guard stored, current == self.bufferRevision, !self.navigationBlocked else {
+                guard stored, current == self.bufferRevision, !self.navigationBlocked, stillValid() else {
                     self.status.text = "Save your changes before opening this attachment; the draft could not be safely preserved."
                     return
                 }
-                self.pushDestination(destination)
+                self.pushDestination(destination, stillValid: stillValid)
             }
             return
         }
-        pushDestination(destination)
+        pushDestination(destination, stillValid: stillValid)
     }
 
     func prepareForNavigation(_ completion: @escaping (Bool) -> Void) {
@@ -1176,6 +1188,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     func closeSession() {
+        componentViews?.dispose()
         guard !hasUncertainEditor, !busy else { return }
         cancelWatch()
         attachmentList?.stop()
@@ -1191,6 +1204,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         guard isViewLoaded else { return }
         cancelWatch()
         attachmentList?.stop()
+        componentViews?.dispose()
         pendingSearch?.cancel()
         pendingSearch = nil
         revision += 1
@@ -1201,6 +1215,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
 
     func resumeVisibleReads() {
         guard isViewLoaded, liveVisible, view.window != nil, navigationController?.topViewController === self else { return }
+        componentViews?.activate(screen.components ?? [])
         liveReadRecovery.reset()
         if screen.list != nil && !watchPaused && (listNeedsRefresh || renderedMutationRevision != host.mutationRevision) { refresh() }
         else { startWatch() }
@@ -1241,14 +1256,15 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         else { checkpointEditor { stored in callbacks.forEach { $0(stored) } } }
     }
 
-    private func pushDestination(_ destination: String) {
+    private func pushDestination(_ destination: String, stillValid: @escaping () -> Bool = { true }) {
+        guard stillValid() else { return }
         let current = bufferRevision
         setBusy(true)
         if instance != nil {
             host.open(destination) { [weak self] result in
                 guard let self else { return }
                 self.setBusy(false)
-                guard current == self.bufferRevision, !self.hasUncertainEditor else {
+                guard current == self.bufferRevision, !self.hasUncertainEditor, stillValid() else {
                     if case .success(let reply) = result, let instance = reply.instance { self.host.command(["kind": "close", "instance": instance]) { _ in } }
                     return
                 }
@@ -1264,6 +1280,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         host.render(destination, values: [:]) { [weak self] result in
             guard let self else { return }
             self.setBusy(false)
+            guard current == self.bufferRevision, !self.hasUncertainEditor, stillValid() else { return }
             switch result {
             case .success(let response):
                 guard let model = response.screen else { self.showFailure(MobileHost.failure(nil)); return }
@@ -1480,6 +1497,7 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
     }
 
     private func addImages(to stack: UIStackView) {
+        addComponents(to: stack)
         let gallery = MobileImageGallery()
         gallery.compact = screen.form?.style == "document"
         gallery.open = { [weak self] destination in self?.openDestination(destination) }
@@ -1491,6 +1509,20 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
         attachments.update(screen.attachments ?? [])
         stack.addArrangedSubview(attachments)
         attachmentList = attachments
+    }
+
+    private func addComponents(to stack: UIStackView) {
+        let components = MobileComponentViews(compact: screen.form?.style == "document")
+        components.open = { [weak self, weak components] event in
+            guard let self, let components, self.liveVisible, self.view.window != nil,
+                  let destination = event.destination else { return }
+            self.openDestination(destination) { [weak self, weak components] in
+                self?.liveVisible == true && components?.contains(event) == true
+            }
+        }
+        components.reconcile(screen.components ?? [])
+        stack.addArrangedSubview(components)
+        componentViews = components
     }
 
     private func refreshImages() {
@@ -1505,6 +1537,9 @@ final class NativeScreenController: UIViewController, UITableViewDataSource, UIT
                 self.imageGallery?.update(model.images ?? [])
                 self.screen.attachments = model.attachments
                 self.attachmentList?.update(model.attachments ?? [])
+                self.screen.components = model.components
+                self.componentViews?.reconcile(model.components ?? [])
+                self.sizeListHeader()
             case .failure:
                 self.status.text = "Attachments could not be refreshed. Your text is still here."
             }

@@ -166,9 +166,10 @@ handling. The shared Notes list still caps at 200 entries.
 The later [component slice](mobile-components.md) adds tabs, typed mixed form
 controls, filters/selection/paging, swipes, and bounded route restoration; the
 [device service slice](mobile-services.md) adds typed platform tasks. Photo
-acquisition now lives in a [compiled extension](compiled-extensions.md).
+acquisition now lives in a [compiled extension](compiled-extensions.md), and Notes
+media content uses a library-owned [rendering component](rendering-extensions.md).
 
-Missing: Android native renderer, arbitrary component trees/custom native widgets,
+Missing: Android native renderer, arbitrary component trees,
 general scene restoration, physical-device release tooling, and a public GoFastr
 renderer-host mounting seam. No remote UI/code loading is added.
 

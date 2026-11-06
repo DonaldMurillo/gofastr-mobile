@@ -2,8 +2,30 @@ package nativeui
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
+
+func TestAttachmentWireRoundTripRejectsSpoofedDerivedMetadata(t *testing.T) {
+	file := Attachment{ID: "opaque", Name: "brief.txt", MediaType: "text/plain", Size: 18, Destination: "/file"}
+	encoded, err := json.Marshal(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Attachment
+	if err := json.Unmarshal(encoded, &decoded); err != nil || decoded.Name != file.Name || decoded.Destination != file.Destination {
+		t.Fatal("attachment cannot round trip through a rendering payload", err)
+	}
+	for _, payload := range []string{
+		`{"name":"brief.txt","mediaType":"text/plain","size":18,"detail":"Trusted system file"}`,
+		`{"name":"brief.txt","mediaType":"text/plain","size":18,"icon":"photo"}`,
+		`{"name":"brief.txt","mediaType":"text/plain","size":18,"html":"<script>"}`,
+	} {
+		if err := json.Unmarshal([]byte(payload), &decoded); err == nil {
+			t.Fatal("invalid attachment presentation payload accepted")
+		}
+	}
+}
 
 func TestAttachmentMetadataAndDestinations(t *testing.T) {
 	file := Attachment{ID: "opaque", Name: "brief.txt", MediaType: "text/plain", Size: 18, Destination: "/file"}

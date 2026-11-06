@@ -74,7 +74,7 @@ func TestPhotosAttachThroughNativeBinding(t *testing.T) {
 		t.Fatalf("photo was duplicated or lost across restart: %+v", listed)
 	}
 	detail := showcaseCommand(t, nativeui.Command{Kind: "open", Connection: connection, Route: attached.Response.Navigation.Route})
-	if detail.Error != nil || len(detail.Screen.Images) != 1 {
+	if detail.Error != nil || len(screenMedia(t, detail.Screen).Images) != 1 {
 		t.Fatalf("the photo detail must actually display the photo: %+v", detail.Error)
 	}
 	export := filesAction(t, nativeui.Command{Connection: connection, Instance: detail.Instance, RequestID: "export-photo", Action: "export"})
@@ -86,10 +86,10 @@ func TestPhotosAttachThroughNativeBinding(t *testing.T) {
 	if note.Screen.Form.Fields[1].Value != "Keep this body." {
 		t.Fatal("photo attachment changed the note body")
 	}
-	if len(note.Screen.Images) != 1 || note.Screen.Images[0].Destination != attached.Response.Navigation.Route || note.Screen.Images[0].Alt == "" {
+	if len(screenMedia(t, note.Screen).Images) != 1 || screenMedia(t, note.Screen).Images[0].Destination != attached.Response.Navigation.Route || screenMedia(t, note.Screen).Images[0].Alt == "" {
 		t.Fatal("the saved note must contain a labelled, tappable photo preview")
 	}
-	preview := note.Screen.Images[0]
+	preview := screenMedia(t, note.Screen).Images[0]
 	config, err := jpeg.DecodeConfig(bytes.NewReader(preview.Data))
 	if err != nil || config.Width != preview.Width || config.Height != preview.Height || config.Width > 512 || config.Height > 512 {
 		t.Fatal("the editor preview must be a real, bounded JPEG")
@@ -97,7 +97,7 @@ func TestPhotosAttachThroughNativeBinding(t *testing.T) {
 	remove := filesAction(t, nativeui.Command{Connection: connection, Instance: detail.Instance, RequestID: "remove-photo", Action: "remove"})
 	filesActionResult(t, nativeui.Command{Kind: "respond", Connection: connection, Instance: detail.Instance, RequestID: "removed-photo", PresentationID: remove.PresentationID, Choice: "remove"})
 	cleared := showcaseCommand(t, nativeui.Command{Kind: "open", Connection: connection, Route: noteRoute})
-	if cleared.Error != nil || len(cleared.Screen.Images) != 0 || cleared.Screen.Form.Fields[1].Value != "Keep this body." {
+	if cleared.Error != nil || len(screenMedia(t, cleared.Screen).Images) != 0 || cleared.Screen.Form.Fields[1].Value != "Keep this body." {
 		t.Fatal("removing a photo must remove only its preview, not the note text")
 	}
 }
@@ -108,6 +108,7 @@ func photosHello(t *testing.T) string {
 		nativeui.CapabilityNavigation: nativeui.SupportAvailable, nativeui.CapabilityEditor: nativeui.SupportAvailable,
 		nativeui.CapabilityPresentation: nativeui.SupportAvailable, nativeui.CapabilityFiles: nativeui.SupportAvailable,
 		nativeui.CapabilityPhotos: nativeui.SupportAvailable, nativeui.CapabilityCamera: nativeui.SupportUnavailable,
+		"gofastr.media/v1": nativeui.SupportAvailable,
 	}}})
 	if reply.Error != nil {
 		t.Fatal(reply.Error)

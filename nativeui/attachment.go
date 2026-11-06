@@ -1,6 +1,7 @@
 package nativeui
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,6 +84,28 @@ func (attachment Attachment) MarshalJSON() ([]byte, error) {
 		Detail string `json:"detail"`
 		Icon   Icon   `json:"icon"`
 	}{payload(attachment), FileDescription(attachment.MediaType, attachment.Size), FileIcon(attachment.MediaType)})
+}
+
+// UnmarshalJSON accepts the derived presentation metadata emitted by MarshalJSON
+// without allowing a library payload to spoof its file category or description.
+func (attachment *Attachment) UnmarshalJSON(content []byte) error {
+	type payload Attachment
+	var decoded struct {
+		payload
+		Detail *string `json:"detail"`
+		Icon   *Icon   `json:"icon"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	value := Attachment(decoded.payload)
+	if decoded.Detail != nil && *decoded.Detail != FileDescription(value.MediaType, value.Size) || decoded.Icon != nil && *decoded.Icon != FileIcon(value.MediaType) {
+		return errors.New("nativeui: invalid derived attachment metadata")
+	}
+	*attachment = value
+	return nil
 }
 
 func validateAttachments(attachments []Attachment) error {

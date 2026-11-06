@@ -28,8 +28,12 @@ func source(definition extension.Definition) (string, string, error) {
 	digest := sha256.Sum256(append(manifest, content...))
 	name := fmt.Sprintf("gfn-extension-%x", digest[:16])
 	capabilities, _ := json.Marshal(definition.Manifest.Capabilities)
+	collection, methods := "__gofastr_file_extension_definitions", "typeof adapter.prepare !== 'function'"
+	if definition.Manifest.Kind == extension.ComponentKind {
+		collection, methods = "__gofastr_component_extension_definitions", "typeof adapter.mount !== 'function'"
+	}
 	wrapped := fmt.Sprintf(`(() => {
-  const definitions = window.__gofastr_file_extension_definitions ||= [];
+  const definitions = window[%s] ||= [];
   const before = definitions.length;
   (() => {
 %s
@@ -37,7 +41,7 @@ func source(definition extension.Definition) (string, string, error) {
   const adapter = definitions[before];
   const declared = %s;
   if (definitions.length !== before + 1 || adapter?.name !== %s ||
-      typeof adapter.prepare !== 'function' || typeof adapter.capabilities !== 'function' ||
+      %s || typeof adapter.capabilities !== 'function' ||
       definitions.slice(0, before).some(item => item.name === adapter.name)) {
     throw new Error('Invalid compiled extension registration');
   }
@@ -52,7 +56,7 @@ func source(definition extension.Definition) (string, string, error) {
   };
   adapter.capabilities();
   (window.__gofastr.loadedModules ||= {})[%s] = true;
-})();`, content, capabilities, strconv.Quote(definition.Manifest.Name), strconv.Quote(name))
+})();`, strconv.Quote(collection), content, capabilities, strconv.Quote(definition.Manifest.Name), methods, strconv.Quote(name))
 	return name, wrapped, nil
 }
 

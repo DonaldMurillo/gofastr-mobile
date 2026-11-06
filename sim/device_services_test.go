@@ -173,7 +173,7 @@ func TestNotesLivePagingWebView(t *testing.T) {
 					if (!response.ok || reply.error) throw new Error(reply.error?.message || 'The independent renderer request failed.');
 					return reply;
 				};
-				const capabilities = Object.fromEntries(['navigation/v1', 'editor/v1', 'drafts/v1', 'presentation/v1', 'files/v1', 'photos/v1', 'sharing/v1', 'clipboard/v1', 'notifications/v1', 'audio/v1', 'live/v1'].map(key => [key, 'available']));
+				const capabilities = Object.fromEntries(['navigation/v1', 'editor/v1', 'drafts/v1', 'presentation/v1', 'files/v1', 'photos/v1', 'sharing/v1', 'clipboard/v1', 'notifications/v1', 'audio/v1', 'live/v1', 'gofastr.media/v1'].map(key => [key, 'available']));
 				const { connection } = await send({ kind: 'hello', hello: { minimum: 1, maximum: 1, renderer: 'webview', capabilities } });
 				const { instance } = await send({ kind: 'open', connection, route: '/notes/new' });
 				const command = { connection, instance, requestId: 'independent-live-save', action: 'save', values: { title: '000 Live added beyond initial snapshot', body: 'An independent renderer command invalidates the visible collection.' } };

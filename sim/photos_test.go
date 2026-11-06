@@ -94,7 +94,7 @@ func runNotesPhotos(t *testing.T, platform mobileui.Platform) {
 		clickMobileAction("Done"), waitForFileScreen("/notes"), chromedp.Click(`a.gfm-row`, chromedp.ByQuery),
 		chromedp.WaitVisible(`input[name="title"]`, chromedp.ByQuery), clickMobileAction("Attachments"),
 		clickMobileAction("Choose photo"), chromedp.WaitVisible(`[data-gfw-file-input]`, chromedp.ByQuery),
-		chromedp.Poll(`(() => { const root = document.querySelector('[data-gfw-screen]'); const config = JSON.parse(root.dataset.gfwConfig); return config.extensions?.length === 1 && window.__gofastr_file_extension_definitions?.some(adapter => adapter.name === 'gofastr.photos/v1'); })()`, nil),
+		chromedp.Poll(`(() => { const root = document.querySelector('[data-gfw-screen]'); const config = JSON.parse(root.dataset.gfwConfig); return config.extensions?.length === 2 && window.__gofastr_file_extension_definitions?.some(adapter => adapter.name === 'gofastr.photos/v1') && window.__gofastr_component_extension_definitions?.some(adapter => adapter.name === 'gofastr.media/v1'); })()`, nil),
 		chromedp.Poll(`!!document.querySelector('[data-gfw-photo-source="library"]')`, nil),
 		chromedp.SetUploadFiles(`[data-gfw-file-input]`, []string{photoPath}, chromedp.ByQuery),
 		fileDialogClosed(), chromedp.Poll(`!!document.querySelector('[data-gfw-file-preview] [data-gfw-file-icon="photo"]') && document.querySelector('.gfw-file-description').textContent.includes('Photo')`, nil))

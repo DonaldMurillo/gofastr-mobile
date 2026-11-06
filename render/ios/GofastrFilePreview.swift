@@ -1,7 +1,7 @@
 import UIKit
 
 final class MobileFilePreviewHeader: UIStackView {
-    init(_ preview: MobileFilePreview) {
+    init(_ preview: MobileFilePreview, open: (() -> Void)? = nil) {
         super.init(frame: .zero)
         axis = .vertical
         alignment = .center
@@ -30,6 +30,9 @@ final class MobileFilePreviewHeader: UIStackView {
         title.font = UIFont(descriptor: title.font.fontDescriptor.withSymbolicTraits(.traitBold) ?? title.font.fontDescriptor, size: 0)
         title.accessibilityTraits.insert(.header)
         title.accessibilityIdentifier = "native.file.name"
+        if let open {
+            title.accessibilityCustomActions = [UIAccessibilityCustomAction(name: "Open file") { _ in open(); return true }]
+        }
         addArrangedSubview(title)
         let detail = MobileAppearance.label(preview.file.detail, style: .subheadline, color: .secondaryLabel)
         detail.textAlignment = .center

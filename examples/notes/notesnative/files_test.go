@@ -67,11 +67,11 @@ func TestFilesThroughNativeBinding(t *testing.T) {
 	}
 	connection = filesHello(t)
 	attachment := showcaseCommand(t, nativeui.Command{Kind: "open", Connection: connection, Route: attachmentRoute})
-	if attachment.Error != nil || attachment.Screen.FilePreview == nil || attachment.Screen.FilePreview.File.Name != "brief.txt" || attachment.Screen.FilePreview.Text != "Private attachment" {
+	if attachment.Error != nil || screenMedia(t, attachment.Screen).Preview == nil || screenMedia(t, attachment.Screen).Preview.File.Name != "brief.txt" || screenMedia(t, attachment.Screen).Preview.Text != "Private attachment" {
 		t.Fatalf("attachment lost on restart: %+v", attachment)
 	}
 	restored := showcaseCommand(t, nativeui.Command{Kind: "open", Connection: connection, Route: noteRoute})
-	if restored.Error != nil || len(restored.Screen.Attachments) != 1 || restored.Screen.Attachments[0].Name != "brief.txt" || restored.Screen.Attachments[0].Destination != attachmentRoute || restored.Editor.Values["body"] != "Not saved" {
+	if restored.Error != nil || len(screenMedia(t, restored.Screen).Attachments) != 1 || screenMedia(t, restored.Screen).Attachments[0].Name != "brief.txt" || screenMedia(t, restored.Screen).Attachments[0].Destination != attachmentRoute || restored.Editor.Values["body"] != "Not saved" {
 		t.Fatalf("file card or unsaved note missing after restart: screen=%+v editor=%+v", restored.Screen, restored.Editor)
 	}
 	export = filesAction(t, nativeui.Command{Connection: connection, Instance: attachment.Instance, RequestID: "attachment-export", Action: "export"})
@@ -92,7 +92,7 @@ func TestFilesThroughNativeBinding(t *testing.T) {
 		t.Fatalf("removed attachment still exists: %+v", missing)
 	}
 	refreshed := showcaseCommand(t, nativeui.Command{Kind: "open", Connection: connection, Route: noteRoute})
-	if refreshed.Error != nil || len(refreshed.Screen.Attachments) != 0 {
+	if refreshed.Error != nil || len(screenMedia(t, refreshed.Screen).Attachments) != 0 {
 		t.Fatalf("removed attachment still has a file card: %+v", refreshed)
 	}
 }
@@ -141,6 +141,7 @@ func filesHello(t *testing.T) string {
 	t.Helper()
 	reply := showcaseCommand(t, nativeui.Command{Kind: "hello", Hello: &nativeui.Hello{Minimum: 1, Maximum: 1, Renderer: "uikit", Capabilities: map[nativeui.Capability]nativeui.Support{
 		nativeui.CapabilityNavigation: nativeui.SupportAvailable, nativeui.CapabilityEditor: nativeui.SupportAvailable, nativeui.CapabilityPresentation: nativeui.SupportAvailable, nativeui.CapabilityFiles: nativeui.SupportAvailable,
+		"gofastr.media/v1": nativeui.SupportAvailable,
 	}}})
 	if reply.Error != nil {
 		t.Fatal(reply.Error)

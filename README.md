@@ -7,6 +7,12 @@ The Notes example exercises the same definitions through either renderer.
 See [shared mobile screens](docs/shared-mobile-screens.md) and
 [Native Notes](docs/native-presentation.md).
 
+Imported libraries can own [rendering components](docs/rendering-extensions.md)
+and [device acquisition adapters](docs/compiled-extensions.md), while applications
+stay Go-only. Notes uses the compiled media component for its attachments.
+See [extension authoring tools](docs/extension-tooling.md) and the separate
+[physical-device acceptance gate](docs/ios-device-acceptance.md).
+
 Existing GoFastr web applications can also run inside a phone app's process.
 Their Go server answers WebView requests over an in-memory listener: no socket,
 no port, no loopback origin. Native rendering does not remove WebView support.
@@ -131,8 +137,12 @@ and recovers retired live reads without replaying writes or replacing inputs.
 
 ## Run the tests
 
+Validation is local-only; this repository intentionally has no CI workflows.
+
 ```bash
+go vet ./...
 go test ./...
+node --test render/webview/*.test.cjs
 SIM_SHOTS=/tmp/shots go test ./sim/ -run TestPhoneWebView -v
 SIM_SHOTS=/tmp/shared-shots go test ./sim/ -run TestSharedMobileScreensWebView -v
 ```

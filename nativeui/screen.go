@@ -2,26 +2,31 @@
 // and WebView renderers. It is independent of GoFastr's web design system.
 package nativeui
 
-import "context"
+import (
+	"context"
+
+	"github.com/DonaldMurillo/gofastr-native/extension"
+)
 
 // Screen describes one task-shaped native screen, not an HTML document.
 type Screen struct {
-	Route       string            `json:"route"`
-	Title       string            `json:"title"`
-	Prompt      string            `json:"prompt,omitempty"`
-	LargeTitle  bool              `json:"largeTitle,omitempty"`
-	Values      map[string]string `json:"values,omitempty"`
-	Actions     []Action          `json:"actions,omitempty"`
-	List        *List             `json:"list,omitempty"`
-	Form        *Form             `json:"form,omitempty"`
-	Text        string            `json:"text,omitempty"`
-	FilePreview *FilePreview      `json:"filePreview,omitempty"`
-	Images      []Image           `json:"images,omitempty"`
-	Attachments []Attachment      `json:"attachments,omitempty"`
-	Requires    []Requirement     `json:"requires,omitempty"`
-	Tabs        []Tab             `json:"tabs,omitempty"`
-	ActiveTab   string            `json:"activeTab,omitempty"`
-	Live        *Live             `json:"live,omitempty"`
+	Route       string                `json:"route"`
+	Title       string                `json:"title"`
+	Prompt      string                `json:"prompt,omitempty"`
+	LargeTitle  bool                  `json:"largeTitle,omitempty"`
+	Values      map[string]string     `json:"values,omitempty"`
+	Actions     []Action              `json:"actions,omitempty"`
+	List        *List                 `json:"list,omitempty"`
+	Form        *Form                 `json:"form,omitempty"`
+	Text        string                `json:"text,omitempty"`
+	FilePreview *FilePreview          `json:"filePreview,omitempty"`
+	Images      []Image               `json:"images,omitempty"`
+	Attachments []Attachment          `json:"attachments,omitempty"`
+	Requires    []Requirement         `json:"requires,omitempty"`
+	Tabs        []Tab                 `json:"tabs,omitempty"`
+	ActiveTab   string                `json:"activeTab,omitempty"`
+	Live        *Live                 `json:"live,omitempty"`
+	Components  []extension.Component `json:"components,omitempty"`
 }
 
 type Tab struct {

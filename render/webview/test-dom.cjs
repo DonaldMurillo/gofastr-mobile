@@ -51,6 +51,13 @@ class Element extends Target {
   append(...children) {
     for (const child of children) { child.remove(); child.parent = this; this.children.push(child); }
   }
+  insertBefore(child, reference) {
+    if (child === reference) return child;
+    child.remove(); child.parent = this;
+    const index = reference ? this.children.indexOf(reference) : this.children.length;
+    this.children.splice(index, 0, child);
+    return child;
+  }
   replaceChildren(...children) { for (const child of [...this.children]) child.remove(); this.append(...children); }
   remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = null; }
   contains(node) { return node === this || this.children.some(child => child.contains(node)); }
@@ -123,7 +130,7 @@ const harness = (options = {}) => {
     mutate: () => observers.forEach(callback => callback()),
     tick(delay) { const entry = [...timers].find(([, timer]) => delay == null || timer.delay === delay); if (!entry) return false; timers.delete(entry[0]); entry[1].callback(); return true; } };
   options.setup?.(fixture);
-  for (const name of ['foreground.js', 'services.js', 'presentation.js', 'files.js', 'components.js', 'live.js']) load(name);
+  for (const name of ['foreground.js', 'services.js', 'presentation.js', 'files.js', 'components.js', 'rendering.js', 'live.js']) load(name);
   fixture.adapter = window.__gofastr_services;
   fixture.open = (request = { id: 'go-key', clipboard: { text: 'Private <text>' } }, respond = async () => {}, serviceId = 'opaque-service') => {
     fixture.adapter.open({ root, request, respond, serviceId, opener });
