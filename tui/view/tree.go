@@ -266,6 +266,37 @@ func (t *Tree) FocusNext(back bool) bool {
 	return true
 }
 
+// Find returns the first laid-out node in tree order that match accepts,
+// or nil.
+func (t *Tree) Find(match func(*Node) bool) *Node {
+	var found *Node
+	t.walk(t.root, func(n *Node) {
+		if found == nil && match(n) {
+			found = n
+		}
+	})
+	return found
+}
+
+// FocusWithin focuses n, or its first focusable descendant, and reports
+// whether anything took focus.
+func (t *Tree) FocusWithin(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	var target *Node
+	t.walk(n, func(c *Node) {
+		if target == nil && focusable(c) {
+			target = c
+		}
+	})
+	if target == nil {
+		return false
+	}
+	t.SetFocus(target)
+	return true
+}
+
 // WantsMotion reports whether a mounted node reacts to hover, so the
 // program should ask the terminal for every pointer movement.
 func (t *Tree) WantsMotion() bool {

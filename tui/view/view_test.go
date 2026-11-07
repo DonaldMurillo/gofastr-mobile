@@ -517,3 +517,22 @@ func TestWheelBubblesToHandler(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestFindAndFocusWithin(t *testing.T) {
+	tree := NewTree(uni.Graphemes)
+	root := E(col{},
+		E(box{name: "a", w: 3, h: 1, focusable: true}),
+		E(col{}, E(box{name: "b", w: 3, h: 1}), E(box{name: "c", w: 3, h: 1, focusable: true})).WithKey("group"),
+	)
+	frame(tree, 5, 4, root)
+	group := tree.Find(func(n *Node) bool { return n.Key() == "group" })
+	if group == nil || !tree.FocusWithin(group) {
+		t.Fatal("group not found or nothing focused")
+	}
+	if got := tree.Focused().Widget().(box).name; got != "c" {
+		t.Fatalf("focused %q, want c", got)
+	}
+	if tree.FocusWithin(group.Child(0)) {
+		t.Fatal("focused an unfocusable subtree")
+	}
+}
