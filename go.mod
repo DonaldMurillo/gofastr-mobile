@@ -2,17 +2,20 @@
 // with native UIKit and mobile WebView renderers. Existing GoFastr web apps
 // run over an in-memory listener, without sockets. It uses public APIs only.
 //
-// gofastr is pinned to a commit until a release carries the seams this
-// module needs (App.Serve, the runtime host transport, framework/localapp).
-// For local development against a gofastr checkout, see go.work.example.
+// gofastr v0.96.0 is the first release with the seams this module needs
+// (App.Serve, the runtime host transport, framework/localapp). For local
+// development against a gofastr checkout, see go.work.example.
 module github.com/DonaldMurillo/gofastr-native
 
 go 1.27.3
 
 require (
-	github.com/DonaldMurillo/gofastr v0.95.1-0.20261104000917-6905b8f07428
+	github.com/DonaldMurillo/gofastr v0.96.0
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
 	github.com/chromedp/chromedp v0.15.1
+	golang.org/x/image v0.47.0
+	golang.org/x/mod v0.42.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
@@ -34,12 +37,9 @@ require (
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/image v0.47.0 // indirect
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867 // indirect
-	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	modernc.org/libc v1.74.1 // indirect
