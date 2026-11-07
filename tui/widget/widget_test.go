@@ -535,3 +535,10 @@ func TestOnKeyCatchesUnusedKeys(t *testing.T) {
 		t.Fatalf("value %q, handler saw %v", f.value, got)
 	}
 }
+
+func TestNestedFlexTakesItsContentSize(t *testing.T) {
+	h := newHarness(t, 12, 5, func() view.Element {
+		return Column(Label("top"), Row(NewButton("Add", nil)), view.E(Input{Placeholder: "type"}))
+	})
+	h.want("top", " Add", "type")
+}

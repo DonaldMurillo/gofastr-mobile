@@ -114,16 +114,8 @@ func (f Flex) Layout(n *view.Node, c layout.Constraints) layout.Size {
 			}
 		}
 	}
-	cross := func(i int) (lo, hi int) {
-		if aligns[i] == layout.Stretch {
-			return crossMax, crossMax
-		}
-		return 0, crossMax
-	}
 	sizes := layout.Distribute(mainMax, f.Gap, items, func(i, limit int) int {
-		lo, hi := cross(i)
-		s := n.LayoutChild(i, f.constraints(0, limit, lo, hi))
-		m, _ := f.axis(s)
+		m, _ := f.axis(n.LayoutChild(i, f.constraints(0, limit, 0, crossMax)))
 		return m
 	})
 	used := 0
@@ -138,17 +130,21 @@ func (f Flex) Layout(n *view.Node, c layout.Constraints) layout.Size {
 		main = mainMax
 	}
 	pos := f.Justify.Offset(main, used)
-	crossUsed := 0
+	// The flex is as thick as its thickest child, or all it may be when its
+	// cross axis is fixed. Stretched children then fill that.
+	crossSize := crossMin
 	childCross := make([]int, len(sizes))
 	for i, s := range sizes {
-		lo, hi := cross(i)
-		got := n.LayoutChild(i, f.constraints(s, s, lo, hi))
-		_, childCross[i] = f.axis(got)
-		crossUsed = max(crossUsed, childCross[i])
+		_, childCross[i] = f.axis(n.LayoutChild(i, f.constraints(s, s, 0, crossMax)))
+		crossSize = max(crossSize, childCross[i])
 	}
-	crossSize := max(crossUsed, crossMin)
-	if f.Align == layout.Stretch {
+	if crossMin == crossMax {
 		crossSize = crossMax
+	}
+	for i, s := range sizes {
+		if aligns[i] == layout.Stretch && childCross[i] != crossSize {
+			_, childCross[i] = f.axis(n.LayoutChild(i, f.constraints(s, s, crossSize, crossSize)))
+		}
 	}
 	for i, s := range sizes {
 		off := aligns[i].Offset(crossSize, childCross[i])
