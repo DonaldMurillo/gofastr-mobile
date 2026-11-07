@@ -349,3 +349,11 @@
 - Evidence: `sim/design_test.go`, `sim/components_test.go`, `sim/files_test.go`, and `sim/photos_test.go` exercise real host screens, metadata, previews, and menu bounds. Isolate browser state per scheme: root navigation can restore the last tab route.
 - Next time: inspect screenshots in light/dark and large text; center offscreen rows before real menu clicks, assert menus clear fixed tabs, and suppress compatibility taps after cancelled/vertical drags too. Keep Swift wire DTOs Foundation-only, separate from UIKit views.
 - Status: active
+
+## 2026-11-06 - Trace and inspect without changing settlement
+- Scope: nativeui, diagnostics, cli, sim
+- Trigger: debugging native-renderer apps needed command traces, a live snapshot and a capability walk without leaking user data or changing replies.
+- Approach: `RuntimeOptions.Observer` gets a redacted `TraceEvent` after the reply is final and all locks are released; `Runtime.Inspect` try-locks sessions; `gofastr-native inspect` builds a harness through `go build -overlay` that can send only hello, open and close. It suppresses app stdout/stderr and reports opaque screen IDs, adding registered patterns only through `InspectApp`. See [debugging](debugging.md) and [component gallery](component-gallery.md).
+- Evidence: `nativeui/trace_settlement_test.go` compares replies with nil, recording and panicking observers; `examples/notes/notesnative/debugtrace_privacy_test.go` (tag `gofastr_debugtrace`) checks canaries; `cmd/gofastr-native/inspect_command_test.go` checks allowed kinds, cleanup and an untouched module; `sim/gallery_test.go` walks the gallery in headless Chromium.
+- Next time: the WebView's first paint renders outside a Runtime, so `RendererContract` is false there. Runtime pre-validation answers "Required." before the action handler runs, so assert on the field-error key, not the handler's message. Go's `-overlay` accepts a file in a directory that does not exist on Go 1.27. The Windows file draft store tests flake about 1 in 6 full `nativeui` runs, also at 88e0a85.
+- Status: active

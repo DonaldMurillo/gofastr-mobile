@@ -1,5 +1,11 @@
-# Build output: the only sanctioned build dir, never committed
+# Generated build artifacts
 /dist/
+
+# Default output of go build ./cmd/gofastr-native
+/gofastr-native
+/gofastr-native.exe
+/cmd/gofastr-native/gofastr-native
+/cmd/gofastr-native/gofastr-native.exe
 
 # Local development against a gofastr checkout (see go.work.example)
 go.work

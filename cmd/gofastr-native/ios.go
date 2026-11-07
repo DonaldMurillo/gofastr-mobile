@@ -26,10 +26,44 @@ import (
 //	simctl          -> boot, install, launch, screenshot
 //
 // Xcode must be installed (the iOS SDK and swiftc ship only inside it), but
-// nothing here opens it. A physical device additionally needs a
-// development team and provisioning profile; that is not wired yet.
+// nothing here opens it. --platform ios-device builds the same bundle
+// against the iphoneos SDK and signs it with the owner's identity and
+// provisioning profiles (ios_release.go).
+
+// iosTarget is the SDK a build compiles against: the simulator, or a
+// physical iPhone.
+type iosTarget struct {
+	sdk      string // xcrun --sdk name: iphonesimulator or iphoneos
+	gomobile string // gomobile -target: iossimulator or ios
+	triple   string // swiftc -target
+	device   bool
+}
+
+func simulatorTarget(minOS string) iosTarget {
+	return iosTarget{sdk: "iphonesimulator", gomobile: "iossimulator", triple: simArch() + "-apple-ios" + minOS + "-simulator"}
+}
+
+func deviceTarget(minOS string) iosTarget {
+	return iosTarget{sdk: "iphoneos", gomobile: "ios", triple: "arm64-apple-ios" + minOS, device: true}
+}
+
+// iosSigner signs one bundle of a physical-device build. The simulator
+// build has none and signs ad hoc.
+type iosSigner interface {
+	sign(r *runner, label, bundleID, bundle string) error
+}
 
 func buildIOS(r *runner, a app, out string) (string, error) {
+	return buildIOSFor(r, a, out, simulatorTarget(a.MinOS), nil, false)
+}
+
+// buildIOSFor assembles and signs the .app for target. Extensions are
+// signed before the app (inside-out).
+func buildIOSFor(r *runner, a app, out string, t iosTarget, signer iosSigner, release bool) (string, error) {
+	traceFlags, err := debugTraceBindFlags(a.DebugTrace, release, a.Renderer)
+	if err != nil {
+		return "", err
+	}
 	a = a.forIOS()
 	if a.HostTemplate == "" {
 		definitions, err := discoverExtensions(r, a.PkgPath)
@@ -43,18 +77,34 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 	if err := bootstrapGomobile(r, bin); err != nil {
 		return "", err
 	}
-	sdk, err := r.output("find the iOS simulator SDK", "<iphonesimulator-sdk>", "xcrun", "--sdk", "iphonesimulator", "--show-sdk-path")
+	sdkDesc, bindDesc, doctorPlatform := "find the iOS simulator SDK", "bind the Go app as an iOS simulator framework", "ios-sim"
+	if t.device {
+		sdkDesc, bindDesc, doctorPlatform = "find the iOS device SDK", "bind the Go app as an iOS device framework", "ios-device"
+	}
+	sdk, err := r.output(sdkDesc, "<"+t.sdk+"-sdk>", "xcrun", "--sdk", t.sdk, "--show-sdk-path")
 	if err != nil {
-		return "", fmt.Errorf("%w\n    (is Xcode installed and selected? run: gofastr-native doctor --platform ios-sim)", err)
+		return "", fmt.Errorf("%w\n    (is Xcode installed and selected? run: gofastr-native doctor --platform %s)", err, doctorPlatform)
 	}
 	xcf := filepath.Join(work, a.Prefix+".xcframework")
-	if err := r.run("bind the Go app as an iOS simulator framework",
-		filepath.Join(bin, "gomobile"), "bind", "-target=iossimulator", "-iosversion="+a.MinOS, "-o", xcf, a.PkgPath); err != nil {
+	bindArgs := append([]string{"bind", "-target=" + t.gomobile, "-iosversion=" + a.MinOS}, goLDFlags(release, false)...)
+	bindArgs = append(bindArgs, traceFlags...)
+	if release {
+		bindArgs = append(bindArgs, "-tags="+releaseTag)
+	}
+	if err := r.run(bindDesc, filepath.Join(bin, "gomobile"), append(bindArgs, "-o", xcf, a.PkgPath)...); err != nil {
 		return "", err
 	}
 	slice := filepath.Join(xcf, "<simulator-slice>")
+	if t.device {
+		slice = filepath.Join(xcf, "<ios-arm64-slice>")
+	}
 	if !r.dryRun {
-		if slice, err = simulatorSlice(xcf, a.Prefix); err != nil {
+		if t.device {
+			slice, err = deviceSlice(xcf, a.Prefix)
+		} else {
+			slice, err = simulatorSlice(xcf, a.Prefix)
+		}
+		if err != nil {
 			return "", err
 		}
 	}
@@ -72,14 +122,13 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 	}); err != nil {
 		return "", err
 	}
-	target := simArch() + "-apple-ios" + a.MinOS + "-simulator"
-	args := []string{"--sdk", "iphonesimulator", "swiftc",
+	args := []string{"--sdk", t.sdk, "swiftc",
 		"-parse-as-library", "-O",
 		// swiftc names the module after -o, and the executable shares the
 		// Go framework's name (Notesmobile): App.swift would then be part of
 		// module Notesmobile and its `import Notesmobile` is ignored.
 		"-module-name", "GofastrHost",
-		"-target", target, "-sdk", sdk,
+		"-target", t.triple, "-sdk", sdk,
 		"-F", slice, "-framework", a.Prefix,
 		// The Go runtime inside the framework resolves DNS and verifies
 		// certificates through these; a static framework does not carry
@@ -99,8 +148,11 @@ func buildIOS(r *runner, a app, out string) (string, error) {
 	}); err != nil {
 		return "", err
 	}
-	if err := buildIOSFeatureExtensions(r, a, work, appDir, sdk, target); err != nil {
+	if err := buildIOSExtensions(r, a, work, appDir, sdk, t, signer); err != nil {
 		return "", err
+	}
+	if signer != nil {
+		return appDir, signer.sign(r, "app", a.ID, appDir)
 	}
 	signArgs := []string{"--force", "--sign", "-", "--timestamp=none"}
 	if a.AppGroup != "" || a.SecureStorage {
@@ -231,6 +283,25 @@ func simulatorSlice(xcf, prefix string) (string, error) {
 		return "", fmt.Errorf("no simulator slice in %s (gomobile bind -target=iossimulator should have written one)", xcf)
 	}
 	return filepath.Dir(matches[0]), nil
+}
+
+// deviceSlice finds the arm64 iphoneos framework inside the xcframework.
+func deviceSlice(xcf, prefix string) (string, error) {
+	matches, err := filepath.Glob(filepath.Join(xcf, "ios-*", prefix+".framework"))
+	if err != nil {
+		return "", err
+	}
+	var device []string
+	for _, m := range matches {
+		slice := filepath.Base(filepath.Dir(m))
+		if !strings.Contains(slice, "simulator") && !strings.Contains(slice, "maccatalyst") && strings.Contains(slice, "arm64") {
+			device = append(device, m)
+		}
+	}
+	if len(device) != 1 {
+		return "", fmt.Errorf("want exactly one ios-arm64 device slice in %s, found %d (gomobile bind -target=ios should have written one)", xcf, len(device))
+	}
+	return filepath.Dir(device[0]), nil
 }
 
 type simDevice struct {

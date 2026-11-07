@@ -310,18 +310,18 @@ func (app *App) Render(ctx context.Context, destination string, values map[strin
 	screen.Route, screen.Values = request.Route, request.Values
 	if screen.Protection != nil {
 		if screen.Protection.LockRoute == screen.Route {
-			return Screen{}, errors.New("nativeui: a protected screen needs a separate lock route")
+			return Screen{}, definitionAt(route.Path, "protection", errors.New("nativeui: a protected screen needs a separate lock route"))
 		}
 		if _, err := app.Resolve(screen.Protection.LockRoute); err != nil {
-			return Screen{}, err
+			return Screen{}, definitionAt(route.Path, "protection", err)
 		}
 		if screen.Form != nil && screen.Form.Draft != nil {
-			return Screen{}, errors.New("nativeui: protected forms cannot persist drafts")
+			return Screen{}, definitionAt(route.Path, "protection", errors.New("nativeui: protected forms cannot persist drafts"))
 		}
 		screen.Requires = append(append([]Requirement(nil), screen.Requires...), Requirement{Capability: CapabilityPrivacy})
 	}
 	if screen.Live != nil && (route.Watch == nil || !validDataVersion(screen.Live.Version)) {
-		return Screen{}, errors.New("nativeui: a live screen requires a bounded version and watch handler")
+		return Screen{}, definitionAt(route.Path, "live", errors.New("nativeui: a live screen requires a bounded version and watch handler"))
 	}
 	if _, exists := request.Values["row"]; exists {
 		return Screen{}, invalidComponents(map[string]string{"row": "Row IDs may only be submitted to a declared row action."})
@@ -332,7 +332,7 @@ func (app *App) Render(ctx context.Context, destination string, values map[strin
 		screen.List = &list
 	}
 	if err := validateScreen(screen, route.Actions); err != nil {
-		return Screen{}, err
+		return Screen{}, definitionAt(route.Path, "screen", err)
 	}
 	if screen.List != nil {
 		for _, row := range screen.List.Rows {
@@ -340,31 +340,31 @@ func (app *App) Render(ctx context.Context, destination string, values map[strin
 				continue
 			}
 			if _, err := app.Resolve(row.Destination); err != nil {
-				return Screen{}, fmt.Errorf("nativeui: invalid row destination: %w", err)
+				return Screen{}, definitionAt(route.Path, "row-destination", fmt.Errorf("nativeui: invalid row destination: %w", err))
 			}
 		}
 	}
 	if err := app.validateRenderingComponents(&screen); err != nil {
-		return Screen{}, err
+		return Screen{}, definitionAt(route.Path, "components", err)
 	}
 	if err := app.validateTabs(screen); err != nil {
-		return Screen{}, err
+		return Screen{}, definitionAt(route.Path, "tabs", err)
 	}
 	for _, preview := range screen.Images {
 		if preview.Destination != "" {
 			if _, err := app.Resolve(preview.Destination); err != nil {
-				return Screen{}, fmt.Errorf("nativeui: invalid image destination: %w", err)
+				return Screen{}, definitionAt(route.Path, "images", fmt.Errorf("nativeui: invalid image destination: %w", err))
 			}
 		}
 	}
 	for _, attachment := range screen.Attachments {
 		if _, err := app.Resolve(attachment.Destination); err != nil {
-			return Screen{}, fmt.Errorf("nativeui: invalid attachment destination: %w", err)
+			return Screen{}, definitionAt(route.Path, "attachments", fmt.Errorf("nativeui: invalid attachment destination: %w", err))
 		}
 	}
 	if screen.FilePreview != nil {
 		if _, err := app.Resolve(screen.FilePreview.File.Destination); err != nil {
-			return Screen{}, fmt.Errorf("nativeui: invalid file preview destination: %w", err)
+			return Screen{}, definitionAt(route.Path, "file-preview", fmt.Errorf("nativeui: invalid file preview destination: %w", err))
 		}
 	}
 	if err := componentValues(&screen); err != nil {
@@ -458,35 +458,35 @@ func decodeValues(payload string) (map[string]string, error) {
 
 func validateScreen(screen Screen, actions map[string]Handle) error {
 	if screen.List != nil && len(screen.Attachments) != 0 {
-		return errors.New("nativeui: file attachments require form or text content")
+		return definitionPart("attachments", errors.New("nativeui: file attachments require form or text content"))
 	}
 	if err := validateAttachments(screen.Attachments); err != nil {
-		return err
+		return definitionPart("attachments", err)
 	}
 	if screen.List != nil && len(screen.Images) != 0 {
-		return errors.New("nativeui: image previews require form or text content")
+		return definitionPart("images", errors.New("nativeui: image previews require form or text content"))
 	}
 	if err := validateImages(screen.Images); err != nil {
-		return err
+		return definitionPart("images", err)
 	}
 	content := 0
 	if screen.List != nil {
 		content++
 		if err := validateList(*screen.List, actions); err != nil {
-			return err
+			return definitionPart("list", err)
 		}
 	}
 	if screen.Form != nil {
 		content++
 		if screen.Form.Style != "" && screen.Form.Style != "document" {
-			return errors.New("nativeui: unsupported form style")
+			return definitionPart("form", errors.New("nativeui: unsupported form style"))
 		}
 		keys := make(map[string]bool)
 		if err := validateFields(screen.Form.Fields, keys); err != nil {
-			return err
+			return definitionPart("form", err)
 		}
 		if len(keys) == 0 {
-			return errors.New("nativeui: empty form")
+			return definitionPart("form", errors.New("nativeui: empty form"))
 		}
 	}
 	if screen.Text != "" {
@@ -495,7 +495,7 @@ func validateScreen(screen Screen, actions map[string]Handle) error {
 	if screen.FilePreview != nil {
 		content++
 		if err := validateFilePreview(*screen.FilePreview); err != nil {
-			return err
+			return definitionPart("file-preview", err)
 		}
 	}
 	if content == 0 && len(screen.Components) != 0 {
@@ -507,10 +507,10 @@ func validateScreen(screen Screen, actions map[string]Handle) error {
 	seen := make(map[string]bool)
 	for _, action := range screen.Actions {
 		if !behavior.SafeToken(action.ID) || action.Label == "" || actions[action.ID] == nil || seen[action.ID] {
-			return errors.New("nativeui: undeclared or duplicate screen action")
+			return definitionPart("actions", errors.New("nativeui: undeclared or duplicate screen action"))
 		}
 		if action.Icon != "" && action.Icon != IconCompose && action.Icon != IconInfo && action.Icon != IconShare {
-			return errors.New("nativeui: unsupported action icon")
+			return definitionPart("actions", errors.New("nativeui: unsupported action icon"))
 		}
 		seen[action.ID] = true
 	}

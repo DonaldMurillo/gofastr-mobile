@@ -54,11 +54,11 @@ final class GoWebViewController: UIViewController, WKNavigationDelegate {
         webView.navigationDelegate = self
         webView.isOpaque = false
         webView.backgroundColor = .systemBackground
-        if #available(iOS 16.4, *) {
+{{if .Debuggable}}        if #available(iOS 16.4, *) {
             // Safari > Develop > Simulator attaches the Web Inspector.
             webView.isInspectable = true
         }
-        view.addSubview(webView)
+{{end}}        view.addSubview(webView)
 
         let dataDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("app", isDirectory: true).path

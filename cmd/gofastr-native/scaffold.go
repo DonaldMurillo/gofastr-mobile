@@ -122,22 +122,45 @@ func sortedScaffoldFiles(files map[string][]byte) []string {
 	return names
 }
 
+// writeScaffold creates directory and every file in files. Names are
+// slash-separated relative paths; each parent directory is created with
+// os.Mkdir, and each file must be new, so nothing that already exists is
+// followed or replaced. On failure it removes what it created, newest first.
 func writeScaffold(directory string, files map[string][]byte, write func(string, []byte) error) (err error) {
+	for name := range files {
+		if !filepath.IsLocal(filepath.FromSlash(name)) || strings.Contains(name, `\`) {
+			return fmt.Errorf("scaffold file %q is not a plain relative path", name)
+		}
+	}
 	if err := os.Mkdir(directory, 0700); err != nil {
 		return err
 	}
-	var created []string
+	var created []string // files and directories, in creation order
+	made := map[string]bool{}
 	defer func() {
 		if err == nil {
 			return
 		}
-		for _, path := range created {
-			err = errors.Join(err, os.Remove(path))
+		for i := len(created) - 1; i >= 0; i-- {
+			err = errors.Join(err, os.Remove(created[i]))
 		}
 		err = errors.Join(err, os.Remove(directory))
 	}()
 	for _, name := range sortedScaffoldFiles(files) {
-		path := filepath.Join(directory, name)
+		parts := strings.Split(name, "/")
+		parent := directory
+		for _, part := range parts[:len(parts)-1] {
+			parent = filepath.Join(parent, part)
+			if made[parent] {
+				continue
+			}
+			if err := os.Mkdir(parent, 0700); err != nil {
+				return err
+			}
+			made[parent] = true
+			created = append(created, parent)
+		}
+		path := filepath.Join(directory, filepath.FromSlash(name))
 		if err := write(path, files[name]); err != nil {
 			return err
 		}

@@ -117,6 +117,24 @@ non-Android assumptions: timestamp ties in undo eviction and teardown running
 after temporary-directory removal. Undo now uses insertion order; lifecycle test
 teardown runs before directory cleanup.
 
+## Release builds
+
+`--profile release` signs with your upload keystore, takes passwords only
+through environment-variable names, and leaves out WebView debugging. It
+verifies the result with `zipalign -c`, `apksigner verify` and `aapt2 dump
+badging` before the APK appears in `--out`. `--package aab` builds a Play
+bundle with a bundletool you supply. `--abi arm64-v8a` drops the emulator
+library. See [release builds](release.md) for the flags, the checks, and the
+gates that stay NOT RUN.
+
+```powershell
+$env:NOTES_UPLOAD_PASS = '...'
+go run ./cmd/gofastr-native build --platform android --pkg ./examples/notes/notesnative --renderer native --profile release --build-number 12 --keystore C:\keys\notes-upload.p12 --key-alias upload --keystore-pass-env NOTES_UPLOAD_PASS
+```
+
+A release APK cannot update a debug install of the same `--id`, because the two
+are signed with different keys.
+
 ## Checks
 
 ```powershell

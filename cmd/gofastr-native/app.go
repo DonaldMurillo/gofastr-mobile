@@ -77,6 +77,16 @@ type app struct {
 	Widgets         bool
 	AppGroup        string
 	Extensions      []compiledExtension
+
+	// Build profile (release.go). The defaults reproduce the debug,
+	// simulator output every template rendered before profiles existed.
+	Profile              string   // debug or release
+	Debuggable           bool     // WebView inspection hooks compiled in
+	DebugTrace           bool     // opt-in tracing in instrumented debug native apps
+	ABIs                 []string // Android ABIs packaged
+	IOSPlatform          string   // DTPlatformName: iphonesimulator or iphoneos
+	IOSSupportedPlatform string   // CFBundleSupportedPlatforms: iPhoneSimulator or iPhoneOS
+	IOSDevice            bool     // physical-device Info.plist keys
 }
 
 var (
@@ -148,6 +158,12 @@ func newApp(pkgPath, pkgName, id, name, version string) (app, error) {
 		MinSDK:      minSDK,
 		TargetSDK:   minSDK,
 		CameraUsage: defaultCameraUsage,
+
+		Profile:              profileDebug,
+		Debuggable:           true,
+		ABIs:                 debugOptions().abis,
+		IOSPlatform:          "iphonesimulator",
+		IOSSupportedPlatform: "iPhoneSimulator",
 	}, nil
 }
 

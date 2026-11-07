@@ -11,6 +11,12 @@ import (
 // Feature executables contain only native adapters and shared wire DTOs. They
 // never link the Go app or inherit its private Keychain access group.
 func buildIOSFeatureExtensions(r *runner, a app, work, appDir, sdk, target string) error {
+	return buildIOSExtensions(r, a, work, appDir, sdk, iosTarget{sdk: "iphonesimulator", gomobile: "iossimulator", triple: target}, nil)
+}
+
+// buildIOSExtensions compiles and signs the share and widget extensions
+// for target. A nil signer signs ad hoc with the simulator entitlements.
+func buildIOSExtensions(r *runner, a app, work, appDir, sdk string, t iosTarget, signer iosSigner) error {
 	type feature struct {
 		enabled                     bool
 		name, module, plist, shared string
@@ -38,8 +44,10 @@ func buildIOSFeatureExtensions(r *runner, a app, work, appDir, sdk, target strin
 			if err := writeRendered("templates/ios/"+f.plist, filepath.Join(bundle, "Info.plist"), ext); err != nil {
 				return err
 			}
-			if err := writeRendered("templates/ios/DeviceFeatures.entitlements.tmpl", filepath.Join(directory, "Extension.entitlements"), ext); err != nil {
-				return err
+			if signer == nil {
+				if err := writeRendered("templates/ios/DeviceFeatures.entitlements.tmpl", filepath.Join(directory, "Extension.entitlements"), ext); err != nil {
+					return err
+				}
 			}
 			content, err := renderios.Sources.ReadFile(f.shared)
 			if err != nil {
@@ -54,7 +62,7 @@ func buildIOSFeatureExtensions(r *runner, a app, work, appDir, sdk, target strin
 			return err
 		}
 		sources = append(sources, filepath.Join(directory, f.shared))
-		args := []string{"--sdk", "iphonesimulator", "swiftc", "-parse-as-library", "-application-extension", "-O", "-module-name", f.module, "-target", target, "-sdk", sdk, "-framework", "Foundation"}
+		args := []string{"--sdk", t.sdk, "swiftc", "-parse-as-library", "-application-extension", "-O", "-module-name", f.module, "-target", t.triple, "-sdk", sdk, "-framework", "Foundation"}
 		for _, framework := range f.frameworks {
 			args = append(args, "-framework", framework)
 		}
@@ -62,6 +70,12 @@ func buildIOSFeatureExtensions(r *runner, a app, work, appDir, sdk, target strin
 		args = append(args, sources...)
 		if err := r.run("compile "+f.name+" extension", "xcrun", args...); err != nil {
 			return err
+		}
+		if signer != nil {
+			if err := signer.sign(r, f.name+" extension", ext.ID, bundle); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := r.run("sign "+f.name+" extension", "codesign", "--force", "--sign", "-", "--timestamp=none", "--entitlements", filepath.Join(directory, "Extension.entitlements"), bundle); err != nil {
 			return err

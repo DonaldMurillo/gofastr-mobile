@@ -187,9 +187,11 @@ func TestStartupFailureDrainsAndStopIsRepeatable(t *testing.T) {
 }
 
 func TestStartupTimeoutCancelsAndJoinsWorkers(t *testing.T) {
+	workerStarted := make(chan struct{})
 	workerDone := make(chan struct{})
 	_, data, host := lifecycleHost(t, func(app *framework.App) {
 		app.OnStart(func(ctx context.Context) error {
+			close(workerStarted)
 			defer close(workerDone)
 			<-ctx.Done()
 			return ctx.Err()
@@ -199,9 +201,20 @@ func TestStartupTimeoutCancelsAndJoinsWorkers(t *testing.T) {
 		t.Fatalf("startup timeout = %v", err)
 	}
 	select {
-	case <-workerDone:
+	case <-host.done:
 	default:
-		t.Fatal("startup returned before its worker was cancelled")
+		t.Fatal("startup returned before Serve finished")
+	}
+	// The deadline also covers migrations. Under load it can expire before
+	// OnStart runs, so only a worker that actually started must be joined.
+	select {
+	case <-workerStarted:
+		select {
+		case <-workerDone:
+		default:
+			t.Fatal("startup returned before its worker was cancelled")
+		}
+	default:
 	}
 	if err := data.DB.Ping(); err == nil {
 		t.Fatal("startup timeout leaked the database")

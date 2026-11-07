@@ -10,6 +10,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DonaldMurillo/gofastr-native/behavior"
@@ -26,6 +27,9 @@ type RuntimeOptions struct {
 	// individual route's grant. Neither callback may reenter the runtime.
 	OnLock  func()
 	OnClose func(string)
+	// Observer, when set, receives one redacted TraceEvent per command after
+	// the reply is final. Nil disables tracing. See Observer for its contract.
+	Observer Observer
 }
 
 // Runtime coordinates local screen instances and commands without owning a
@@ -43,6 +47,8 @@ type Runtime struct {
 	connections        map[string]runtimeConnection
 	sessions           map[string]*runtimeSession
 	privacyGeneration  uint64
+	traceSalt          [32]byte
+	traceSeq           atomic.Uint64
 }
 
 type runtimeConnection struct {
@@ -116,21 +122,28 @@ func NewRuntime(app *App, options RuntimeOptions) (*Runtime, error) {
 	if options.MaxSessions < 1 || options.MaxSessions > 4096 || options.IdleTimeout < time.Second {
 		return nil, errors.New("nativeui: invalid runtime limits")
 	}
-	return &Runtime{app: app, options: options, connections: make(map[string]runtimeConnection), sessions: make(map[string]*runtimeSession), draftOwners: make(map[string]string), presentationOwners: make(map[string]string), watchSlots: make(chan struct{}, options.MaxSessions)}, nil
+	runtime := &Runtime{app: app, options: options, connections: make(map[string]runtimeConnection), sessions: make(map[string]*runtimeSession), draftOwners: make(map[string]string), presentationOwners: make(map[string]string), watchSlots: make(chan struct{}, options.MaxSessions)}
+	if _, err := rand.Read(runtime.traceSalt[:]); err != nil {
+		return nil, errors.New("nativeui: secure diagnostics salt unavailable")
+	}
+	return runtime, nil
 }
 
 // CommandJSON is the bounded gomobile boundary for built-in screen services.
 func (runtime *Runtime) CommandJSON(ctx context.Context, encoded string) (string, error) {
 	if len(encoded) > 8<<20 {
+		runtime.emitInvalid(time.Now())
 		return "", errors.New("nativeui: command is too large")
 	}
 	var command Command
 	decoder := json.NewDecoder(strings.NewReader(encoded))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&command); err != nil {
+		runtime.emitInvalid(time.Now())
 		return "", errors.New("nativeui: invalid command")
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		runtime.emitInvalid(time.Now())
 		return "", errors.New("nativeui: expected one command")
 	}
 	reply := runtime.Handle(ctx, command)
@@ -141,6 +154,13 @@ func (runtime *Runtime) CommandJSON(ctx context.Context, encoded string) (string
 // Handle executes one local command. Repeated action IDs never execute twice
 // within a retained instance; no transport or mutation is automatically retried.
 func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
+	if observer := runtime.options.Observer; observer != nil {
+		return runtime.traced(ctx, observer, command)
+	}
+	return runtime.handle(ctx, command)
+}
+
+func (runtime *Runtime) handle(ctx context.Context, command Command) Reply {
 	reply := Reply{Version: ProtocolVersion, Connection: command.Connection, Instance: command.Instance, RequestID: command.RequestID, Revision: command.Revision}
 	if command.Version != ProtocolVersion {
 		reply.Error = commandFailure("protocol", "The app and renderer use incompatible mobile protocols.")
@@ -183,6 +203,13 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 		reply.Error = commandFailure("expired", "This renderer connection expired. Reopen the screen; actions were not retried.")
 		return reply
 	}
+	ctx = withRendererContract(ctx, &connection.contract)
+	scratch := traceFrom(runtime, ctx)
+	if scratch != nil {
+		scratch.mu.Lock()
+		scratch.renderer = connection.contract.Renderer
+		scratch.mu.Unlock()
+	}
 	if command.Kind == "lock" {
 		if connection.contract.Capabilities[CapabilityPrivacy] != SupportAvailable {
 			reply.Error = commandFailure("unsupported", "Protected screens are unavailable in this renderer.")
@@ -206,6 +233,14 @@ func (runtime *Runtime) Handle(ctx context.Context, command Command) Reply {
 	if session.connection != command.Connection {
 		reply.Error = commandFailure("expired", "This screen instance is no longer active.")
 		return reply
+	}
+	if scratch != nil {
+		action := ""
+		if command.Kind == "action" {
+			action = command.Action
+		}
+		// Deferred after the unlock, so it runs first, under the session lock.
+		defer runtime.captureSession(scratch, session, action)
 	}
 	session.used = runtime.options.Now()
 	if command.Kind == "ack" {
@@ -303,10 +338,11 @@ func (runtime *Runtime) open(ctx context.Context, command Command, contract Cont
 	runtime.mu.Unlock()
 	screen, err := runtime.app.Render(ctx, command.Route, command.Values)
 	if err != nil {
-		reply.Error = safeFailure(err)
+		reply.Error = runtime.fail(ctx, err)
 		return reply
 	}
 	if err := contract.Check(screen.Requires); err != nil {
+		runtime.noteRefused(ctx, contract, screen.Requires)
 		reply.Error = commandFailure("unsupported", err.Error())
 		return reply
 	}
@@ -447,7 +483,7 @@ func (runtime *Runtime) action(ctx context.Context, session *runtimeSession, com
 				runtime.persist(ctx, session)
 			}
 		}
-		reply.Error, reply.Editor = safeFailure(err), runtime.editorState(session)
+		reply.Error, reply.Editor = runtime.fail(ctx, err), runtime.editorState(session)
 		if errors.Is(err, ErrUnknownAction) {
 			reply.Error = commandFailure("invalid_request", "Choose an available action.")
 		}
@@ -486,7 +522,7 @@ func (runtime *Runtime) action(ctx context.Context, session *runtimeSession, com
 	session.mu.Lock()
 	session.active, record.finished, record.response = false, true, response
 	if err != nil {
-		record.failure = safeFailure(err)
+		record.failure = runtime.fail(ctx, err)
 		record.unknown = definition.Commit && record.failure.Code == "internal"
 		if record.unknown {
 			record.failure = commandFailure("unknown", "The save outcome is unknown. It may have succeeded. Your draft is retained; inspect the notes before saving again.")

@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"debug/macho"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -291,61 +289,4 @@ func inspectDeviceApp(options deviceDoctorOptions, required map[string]bool, dev
 	profileCheck, err := inspectProvisioning(profile, info.Identifier, team, devices, now)
 	add("provisioning expiry/team/app/device match", err == nil, profileCheck, "use an unexpired matching existing profile allowing the selected device; provisioning/signing changes require the owner outside doctor")
 	return checks
-}
-
-func signatureTeam(signature string) string {
-	for _, line := range strings.Split(signature, "\n") {
-		if team, found := strings.CutPrefix(line, "TeamIdentifier="); found && team != "not set" {
-			return strings.TrimSpace(team)
-		}
-	}
-	return ""
-}
-
-type provisioningNode struct {
-	XMLName  xml.Name
-	Text     string             `xml:",chardata"`
-	Children []provisioningNode `xml:",any"`
-}
-
-func (node provisioningNode) field(name string) provisioningNode {
-	for index := 0; index+1 < len(node.Children); index += 2 {
-		if node.Children[index].XMLName.Local == "key" && node.Children[index].Text == name {
-			return node.Children[index+1]
-		}
-	}
-	return provisioningNode{}
-}
-
-func inspectProvisioning(content []byte, bundleID, team string, devices []deviceRecord, now time.Time) (string, error) {
-	if len(content) > 4<<20 {
-		return "oversized decoded profile", errors.New("profile exceeds 4 MiB")
-	}
-	var plist provisioningNode
-	if err := xml.NewDecoder(bytes.NewReader(content)).Decode(&plist); err != nil {
-		return "invalid profile XML", err
-	}
-	if plist.XMLName.Local != "plist" || len(plist.Children) != 1 || plist.Children[0].XMLName.Local != "dict" {
-		return "invalid profile dictionary", errors.New("profile dictionary missing")
-	}
-	profile := plist.Children[0]
-	expiry, err := time.Parse(time.RFC3339, profile.field("ExpirationDate").Text)
-	if err != nil || !expiry.After(now) {
-		return "expired or missing profile expiration", errors.New("profile expiration invalid")
-	}
-	entitlements := profile.field("Entitlements")
-	application := entitlements.field("application-identifier").Text
-	pattern := team + "." + bundleID
-	matches := application == pattern || strings.HasSuffix(application, ".*") && strings.HasPrefix(pattern, strings.TrimSuffix(application, "*"))
-	if team == "" || !matches || entitlements.field("com.apple.developer.team-identifier").Text != team {
-		return "profile app/team mismatch", errors.New("profile identity mismatch")
-	}
-	for _, allowed := range profile.field("ProvisionedDevices").Children {
-		for _, device := range devices {
-			if allowed.XMLName.Local == "string" && allowed.Text == device.Hardware.UDID {
-				return "unexpired until " + expiry.UTC().Format(time.RFC3339) + "; app/team match; usable device allowed", nil
-			}
-		}
-	}
-	return "no selected usable device in profile allowlist", errors.New("device provisioning not established")
 }

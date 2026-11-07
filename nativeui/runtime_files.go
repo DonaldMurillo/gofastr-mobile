@@ -145,7 +145,7 @@ func (runtime *Runtime) fileResult(ctx context.Context, session *runtimeSession,
 		var validationErr error
 		values, validationErr = continuationValues(session, pending.action, pending.values, command.Values)
 		if validationErr != nil {
-			reply.Error, reply.Editor = safeFailure(validationErr), runtime.editorState(session)
+			reply.Error, reply.Editor = runtime.fail(ctx, validationErr), runtime.editorState(session)
 			return reply
 		}
 	}
@@ -192,7 +192,7 @@ func (runtime *Runtime) fileResult(ctx context.Context, session *runtimeSession,
 		return reply
 	}
 	if err != nil {
-		record.failure = safeFailure(err)
+		record.failure = runtime.fail(ctx, err)
 		if definition.Commit && record.failure.Code == "internal" {
 			session.uncertain, record.unknown = true, true
 			record.failure = commandFailure("unknown", "The file operation outcome is unknown. Inspect the data before trying again; it was not retried.")

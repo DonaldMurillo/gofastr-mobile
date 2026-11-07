@@ -82,7 +82,7 @@ func Start(dataDir string) error {
 		_ = shared.App.Shutdown(context.Background())
 		return err
 	}
-	runtime, err := nativeui.NewRuntime(screens, nativeui.RuntimeOptions{Drafts: drafts, OnLock: devices.Lock, OnClose: devices.CloseRoute})
+	runtime, err := nativeui.NewRuntime(screens, nativeui.RuntimeOptions{Drafts: drafts, OnLock: devices.Lock, OnClose: devices.CloseRoute, Observer: debugObserver()})
 	if err != nil {
 		_ = shared.App.Shutdown(context.Background())
 		return err

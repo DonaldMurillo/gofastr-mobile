@@ -38,7 +38,7 @@ func (runtime *Runtime) presentService(ctx context.Context, session *runtimeSess
 	}
 	values, err := continuationValues(session, record.sourceAction, record.inputValues, command.Values)
 	if err != nil {
-		reply.Error = safeFailure(err)
+		reply.Error = runtime.fail(ctx, err)
 		return
 	}
 	if !maps.Equal(values, record.inputValues) {
@@ -52,7 +52,7 @@ func (runtime *Runtime) presentService(ctx context.Context, session *runtimeSess
 	session.mu.Lock()
 	session.active = false
 	if err != nil {
-		reply.Error = safeFailure(err)
+		reply.Error = runtime.fail(ctx, err)
 		return
 	}
 	if command.Revision != session.revision || session.closed || !runtime.ownsDraft(session) {
@@ -122,7 +122,7 @@ func (runtime *Runtime) serviceResult(ctx context.Context, session *runtimeSessi
 	}
 	values, err := continuationValues(session, pending.action, pending.values, command.Values)
 	if err != nil {
-		reply.Error, reply.Editor = safeFailure(err), runtime.editorState(session)
+		reply.Error, reply.Editor = runtime.fail(ctx, err), runtime.editorState(session)
 		return reply
 	}
 	if !sameServiceTarget(session.screen, pending.values, values) {
@@ -176,7 +176,7 @@ func (runtime *Runtime) serviceResult(ctx context.Context, session *runtimeSessi
 		}
 	}
 	if err != nil {
-		record.failure = safeFailure(err)
+		record.failure = runtime.fail(ctx, err)
 		if definition.Commit && record.failure.Code == "internal" {
 			session.uncertain, record.unknown = true, true
 			record.failure = commandFailure("unknown", "The service mutation outcome is unknown. Inspect the data before trying again; it was not retried.")

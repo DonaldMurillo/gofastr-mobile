@@ -1,0 +1,86 @@
+package starter
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/DonaldMurillo/gofastr-native/nativeui"
+)
+
+func TestLifecycle(t *testing.T) {
+	defer Stop()
+	if _, err := Render(Root(), "{}"); err == nil {
+		t.Fatal("Render worked before Start")
+	}
+	if err := Start("relative"); err == nil {
+		t.Fatal("Start accepted a relative data directory")
+	}
+	directory := t.TempDir()
+	if err := Start(directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := Start(directory); err == nil {
+		t.Fatal("Start worked twice")
+	}
+	if _, err := Render(Root(), "{}"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Dispatch(Root(), "new", "{}"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Render(Root(), "{}"); err == nil {
+		t.Fatal("Render worked after Stop")
+	}
+	if _, err := Command("{}"); err == nil {
+		t.Fatal("Command worked after Stop")
+	}
+}
+
+// A checkpointed draft is what a restart from gofastr-native dev preserves.
+func TestDraftSurvivesRestart(t *testing.T) {
+	defer Stop()
+	call := func(command nativeui.Command) nativeui.Reply {
+		t.Helper()
+		command.Version = nativeui.ProtocolVersion
+		payload, err := json.Marshal(command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := Command(string(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reply nativeui.Reply
+		if err := json.Unmarshal([]byte(encoded), &reply); err != nil || reply.Error != nil {
+			t.Fatalf("%s: %+v %v", command.Kind, reply.Error, err)
+		}
+		return reply
+	}
+	hello := nativeui.Command{Kind: "hello", Hello: &nativeui.Hello{Minimum: 1, Maximum: 1, Renderer: "android", Capabilities: map[nativeui.Capability]nativeui.Support{
+		nativeui.CapabilityNavigation: nativeui.SupportAvailable, nativeui.CapabilityEditor: nativeui.SupportAvailable, nativeui.CapabilityDrafts: nativeui.SupportAvailable,
+	}}}
+	directory := t.TempDir()
+	if err := Start(directory); err != nil {
+		t.Fatal(err)
+	}
+	connection := call(hello).Connection
+	opened := call(nativeui.Command{Kind: "open", Connection: connection, Route: "/items/new"})
+	draft := map[string]string{"title": "Half-typed", "body": "still editing"}
+	if reply := call(nativeui.Command{Kind: "checkpoint", Connection: connection, Instance: opened.Instance, Revision: 1, Values: draft}); !reply.Editor.DraftStored {
+		t.Fatal("the checkpoint was not stored")
+	}
+	if err := Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Start(directory); err != nil {
+		t.Fatal(err)
+	}
+	connection = call(hello).Connection
+	reopened := call(nativeui.Command{Kind: "open", Connection: connection, Route: "/items/new"})
+	if !reopened.Editor.Restored || reopened.Editor.Values["title"] != "Half-typed" {
+		t.Fatalf("draft not restored: %+v", reopened.Editor)
+	}
+}

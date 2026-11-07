@@ -118,7 +118,7 @@ func (runtime *Runtime) watch(ctx context.Context, session *runtimeSession, comm
 		if waitErr != nil {
 			reply.Error = commandFailure("cancelled", "Live read cancelled.")
 		} else {
-			reply.Error = safeFailure(outcome.err)
+			reply.Error = runtime.fail(ctx, outcome.err)
 		}
 		return reply
 	}

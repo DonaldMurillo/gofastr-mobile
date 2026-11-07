@@ -164,8 +164,28 @@ func fileDialogClosed() chromedp.Action {
 }
 
 func waitForFileScreen(route string) chromedp.Action {
-	return chromedp.Poll(fmt.Sprintf(`(() => {
+	predicate := fmt.Sprintf(`(() => {
 		const screen = document.querySelector('[data-gfw-config]');
 		return screen && screen.dataset.gfwInstance && JSON.parse(screen.dataset.gfwConfig).route === %s;
-	})()`, mustJSON(route)), nil, chromedp.WithPollingTimeout(10*time.Second))
+	})()`, mustJSON(route))
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		for {
+			err := chromedp.Poll(predicate, nil, chromedp.WithPollingTimeout(0)).Do(ctx)
+			if err == nil || !strings.Contains(err.Error(), "Cannot find context with specified id (-32000)") {
+				return err
+			}
+			// Poll binds one JavaScript context. Navigation can replace it
+			// before CDP evaluates this read-only readiness predicate. Recheck
+			// the new document without repeating navigation or user actions.
+			timer := time.NewTimer(10 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+	})
 }

@@ -1,0 +1,47 @@
+# <%.Name%>
+
+A gofastr-native app with Go-defined screens. The bundled Android and UIKit
+renderers draw them; there is no Swift, Java, Xcode project, or Gradle build.
+
+- `screens/` holds the screens and a small item store.
+- `<%.Package%>/` is the gomobile bind package the native host calls.
+
+Module: `<%.Module%>`. <%.NativeNote%>
+
+## Commands
+
+Run these from this directory. `go tool gofastr-native` uses the CLI version
+pinned in `go.mod`, so the CLI always matches the library.
+
+```sh
+go test ./...
+go tool gofastr-native doctor --platform android-emu
+go tool gofastr-native run --platform android-emu --renderer native --pkg ./<%.Package%><%.IdentityFlags%>
+go tool gofastr-native dev --platform android-emu --renderer native --pkg ./<%.Package%><%.IdentityFlags%>
+go tool gofastr-native dev --platform go --pkg ./<%.Package%> --test
+```
+
+On a Mac with Xcode, use `--platform ios-sim` instead of `android-emu`.
+
+## What dev does
+
+`dev` watches the Go packages the app imports. After a change it rebuilds,
+reinstalls, and restarts the app. It is not hot reload:
+
+- Navigation starts again at the Items list.
+- Saved items persist. They live in the app's data directory, which a
+  reinstall keeps.
+- Before reinstalling, `dev` sends the app to the background so the renderer
+  checkpoints open editors, then waits briefly. This is best effort. `dev`
+  cannot confirm the checkpoint finished, so edits newer than the last
+  completed checkpoint can be lost. `--no-checkpoint` skips this step.
+- A failed build leaves the installed app alone.
+
+`--platform go` runs `go vet` and `go build` (and with `--test`, `go test ./...`)
+on every change, without a device.
+
+## Storage limits
+
+The starter store keeps up to 63 items, one private file each. Replace it with
+your own storage when you outgrow it. A save from two editors of the same item
+keeps the last one.

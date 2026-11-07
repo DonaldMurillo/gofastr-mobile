@@ -99,7 +99,7 @@ func (runtime *Runtime) respond(ctx context.Context, session *runtimeSession, co
 		var err error
 		values, err = continuationValues(session, pending.action, pending.values, command.Values)
 		if err != nil {
-			reply.Error, reply.Editor = safeFailure(err), runtime.editorState(session)
+			reply.Error, reply.Editor = runtime.fail(ctx, err), runtime.editorState(session)
 			return reply
 		}
 	}
@@ -149,7 +149,7 @@ func (runtime *Runtime) respond(ctx context.Context, session *runtimeSession, co
 		return reply
 	}
 	if err != nil {
-		record.failure = safeFailure(err)
+		record.failure = runtime.fail(ctx, err)
 		if definition.Commit && record.failure.Code == "internal" {
 			session.uncertain, record.unknown = true, true
 			record.failure = commandFailure("unknown", "The operation outcome is unknown. Inspect the data before trying again; it was not retried.")

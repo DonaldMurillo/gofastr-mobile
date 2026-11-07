@@ -31,10 +31,10 @@
 	<string>{{xml .Build}}</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
-		<string>iPhoneSimulator</string>
+		<string>{{xml .IOSSupportedPlatform}}</string>
 	</array>
 	<key>DTPlatformName</key>
-	<string>iphonesimulator</string>
+	<string>{{xml .IOSPlatform}}</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MinimumOSVersion</key>
@@ -49,6 +49,10 @@
 {{end}}{{if .Widgets}}	<key>GofastrWidgets</key><true/>
 	<key>GofastrWidgetScheme</key><string>{{xml .URLScheme}}</string>
 {{end}}{{if .AppGroup}}	<key>GofastrAppGroup</key><string>{{xml .AppGroup}}</string>
+{{end}}{{if .IOSDevice}}	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
 {{end}}	<key>UIDeviceFamily</key>
 	<array>
 		<integer>1</integer>

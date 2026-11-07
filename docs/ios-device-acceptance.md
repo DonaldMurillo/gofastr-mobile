@@ -93,9 +93,23 @@ go run ./cmd/gofastr-native extension check --pkg ./examples/notes/notesnative
 ```
 
 Do not use `run --platform ios-sim` as a physical-device install workflow.
-The CLI deliberately does not offer a device install/sign/reset command here.
-No additional unsigned arm64 product build is claimed in this slice; the parent
-workflow owns full build/link validation using existing supported tooling.
+`build --platform ios-device` now builds, signs and packages a device app with
+the owner's identity and profiles, and `run --platform ios-device --device <id>`
+installs and launches it. See [release builds](release.md#iphone---platform-ios-device).
+Doctor stays read-only, and no command resets, uninstalls or pairs a device.
+None of these paths has run on a Mac yet:
+
+| Device build gate | Status |
+| --- | --- |
+| `build --platform ios-device` on a Mac with a real development profile | NOT RUN |
+| `codesign --verify --deep --strict` and entitlement equality on the signed app | NOT RUN |
+| Ad hoc `--profile release` IPA installed on a registered iPhone | NOT RUN |
+| `run --platform ios-device` install, launch, and UNKNOWN-outcome handling | NOT RUN |
+| Share extension and widget through the app-group container on device | NOT RUN |
+| Keychain isolation: an extension cannot read the app's private item | NOT RUN |
+
+A dry run with synthetic profiles passes in the unit tests. It shows the
+planned commands and the profile checks, not a working device build.
 
 ## Repeatable owner-operated acceptance matrix
 

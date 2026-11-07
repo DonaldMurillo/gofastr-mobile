@@ -27,6 +27,28 @@ import path, so this repository sees exactly what any other app sees. When it
 needs something the framework does not expose, the fix goes into gofastr as a
 public seam, not a copy here.
 
+## Start a new app
+
+```sh
+go run ./cmd/gofastr-native doctor --platform android-emu
+go run ./cmd/gofastr-native init --out ../hello
+cd ../hello
+go test ./...
+go tool gofastr-native dev --platform android-emu --renderer native --pkg ./hello
+```
+
+`init` creates a module with Go screens, a private item store, durable
+drafts, tests, and the CLI pinned as a `go tool`. It never writes into an
+existing directory. Until gofastr-native publishes a version, the new
+`go.mod` uses this checkout through a `replace`. `dev` rebuilds, reinstalls,
+and restarts the app after each change; it is not hot reload. See
+[getting started](docs/getting-started.md) for what survives a restart and
+what `dev` does when a build or install fails. `examples/starter` is the
+same scaffold, rendered inside this repository.
+
+See [developer workflow and validation](docs/developer-workflow.md) for a
+command overview, completed checks, and the remaining platform acceptance gates.
+
 ## The gofastr pin
 
 No gofastr release carries the seams this module uses yet, so `go.mod` pins
@@ -75,7 +97,7 @@ entityui screens at phone width. Both renderers support list/editor/About,
 search, create/edit, explicit saves, validation, and draft recovery, with
 documented platform differences.
 
-Notes is the single showcase application. Its **Behaviors** screen adds
+Notes is the main application example. Its **Behaviors** screen adds
 Go-authored alerts, confirmations, menus, dialogs, sheets, and single/multiple
 selection through both renderers. Native/WebView packages are thin launch
 adapters, not separate example products. See [Go presentation behaviors](docs/presentation-behaviors.md).
@@ -218,9 +240,8 @@ go run ./cmd/gofastr-native run --platform android-emu --pkg ./examples/notes/no
 prints every step without running any. `--device` picks a simulator (name or
 UDID), an adb serial or an AVD. `--id` and `--name` set the bundle id and the
 display name. Output lands in `dist/mobile/<platform>/`.
-`--renderer native` selects the bundled Go-definition-driven UIKit renderer;
-native Android is not implemented. Without it the WebView hosts remain the
-default. `--host-template` remains an experimental custom-host escape hatch,
+`--renderer native` selects the bundled Go-definition-driven UIKit or Android
+renderer. Without it the WebView hosts remain the default. `--host-template` remains an experimental custom-host escape hatch,
 not the application screen-authoring model; it cannot be combined with native
 renderer selection. See [the contract and limits](docs/native-presentation.md).
 `--microphone-usage 'Record a voice note to attach privately.'` explicitly adds
@@ -239,6 +260,14 @@ adapter; custom host templates must opt into that library integration themselves
 
 Safari > Develop > Simulator attaches the Web Inspector to the iOS WebView;
 `chrome://inspect` attaches DevTools to the Android one.
+
+Signed release builds, Android App Bundles, and `--platform ios-device` are
+described in [release builds](docs/release.md). That page lists which release
+gates still need hardware or a store account and have not been run.
+
+Run the [component gallery](docs/component-gallery.md) to explore supported
+controls. Use [inspection and tracing](docs/debugging.md) to diagnose screen
+definitions and runtime commands without logging app content.
 
 A simulator build runs one JavaScript check on request: the body of an async
 function in `GOFASTR_MOBILE_EVAL` runs once in the first page, and its result
@@ -309,10 +338,12 @@ interception path and `Open`, which hands chunks over as they arrive.
 
 ## Not verified yet
 
-- The Android app on an emulator or device. No Android SDK is set up on the
-  development machine.
-- A physical iPhone. It needs a development team and a provisioning profile,
-  which the CLI does not wire yet.
+- Android beyond one Android 14 x86-64 emulator: ARM64 devices, other API
+  levels, TalkBack, and physical camera and microphone. The emulator runs
+  that did happen are in [Android builds and acceptance](docs/android.md).
+- A physical iPhone. `--platform ios-device` builds a signed app (see
+  [release builds](docs/release.md)), but install and launch on a registered
+  iPhone has not been run.
 - On device: whether `gofastr://app` is a secure context (Web Crypto,
   service workers) and whether `localStorage` persists.
 
@@ -344,7 +375,7 @@ Follow the [milestones and acceptance gates](docs/mobile-roadmap.md#build-order-
 
 1. Finish the remaining M2 Back/IME/accessibility gates over the shared editor/runtime.
 2. Propose a complete public listener-free lifecycle seam; do not copy framework startup.
-3. Resume Android native only when a runnable environment is available; preserve WebView support.
+3. Run the Android gates [Android builds and acceptance](docs/android.md) leaves open; preserve WebView support.
 4. Expand task-shaped components/capabilities, then extensions, scaffolding, device
    signing, and measured optimization. Re-pin to framework releases as required
    public seams become available.

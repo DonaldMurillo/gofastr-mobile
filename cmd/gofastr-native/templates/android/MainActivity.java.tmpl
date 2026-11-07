@@ -59,9 +59,9 @@ public final class MainActivity extends Activity {
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        // chrome://inspect on the desktop attaches DevTools.
+{{if .Debuggable}}        // chrome://inspect on the desktop attaches DevTools.
         WebView.setWebContentsDebuggingEnabled(true);
-        web.setWebViewClient(new GoClient());
+{{end}}        web.setWebViewClient(new GoClient());
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileChoice != null) fileChoice.onReceiveValue(null);

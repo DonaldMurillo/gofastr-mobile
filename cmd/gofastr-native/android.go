@@ -116,12 +116,48 @@ func executableName(name string) string {
 	return name
 }
 
+// buildAndroid is the debug build: debug key, both ABIs, an APK.
 func buildAndroid(r *runner, a app, out string) (string, error) {
+	return buildAndroidProfile(r, a, out, debugOptions())
+}
+
+// buildAndroidProfile builds with the given profile. The debug profile
+// runs exactly the steps buildAndroid always ran; release ones are in
+// android_release.go.
+func buildAndroidProfile(r *runner, a app, out string, o releaseOptions) (_ string, err error) {
+	if o.release() {
+		// Every line the tools print and every error returned from here on
+		// passes redaction; r.out is restored when the build returns.
+		defer redactOutput(r, secretValues(o.android.storePassEnv, o.android.keyPassEnv))(&err)
+	}
+	traceFlags, err := debugTraceBindFlags(a.DebugTrace, o.release(), a.Renderer)
+	if err != nil {
+		return "", err
+	}
 	sdk, err := findAndroidSDK(r.dryRun)
 	if err != nil {
 		return "", fmt.Errorf("%w (run: gofastr-native doctor --platform android-emu)", err)
 	}
 	a = a.forAndroid(sdk.api)
+	if len(a.ABIs) == 0 {
+		a.ABIs = o.abis
+	}
+	var cert keystoreCert
+	if o.release() {
+		var names []string
+		if o.apk {
+			names = append(names, a.Exe+".apk")
+		}
+		if o.aab {
+			names = append(names, a.Exe+".aab")
+		}
+		if err := removeStale(r, out, names...); err != nil {
+			return "", err
+		}
+		if cert, err = preflightKeystore(r, sdk, o.android, time.Now()); err != nil {
+			return "", err
+		}
+	}
 	if a.Renderer == "native" {
 		a.Extensions, err = discoverPlatformExtensions(r, a.PkgPath, "android")
 		if err != nil {
@@ -145,15 +181,24 @@ func buildAndroid(r *runner, a app, out string) (string, error) {
 		binder.dir = compatibilityDir
 		binder.env = append(append([]string(nil), r.env...), "GOWORK=off")
 	}
+	bindArgs := append([]string{"bind", gomobileAndroidTarget(a.ABIs)}, goLDFlags(o.release(), true)...)
+	bindArgs = append(bindArgs, traceFlags...)
+	if o.release() {
+		bindArgs = append(bindArgs, "-tags="+releaseTag)
+	}
 	if err := binder.run("bind the Go app as an Android library",
-		filepath.Join(bin, executableName("gomobile")), "bind", "-target=android/arm64,android/amd64",
-		"-ldflags=-extldflags=-Wl,-z,max-page-size=16384",
-		"-androidapi", strconv.Itoa(a.MinSDK), "-o", aar, a.PkgPath); err != nil {
+		filepath.Join(bin, executableName("gomobile")), append(bindArgs,
+			"-androidapi", strconv.Itoa(a.MinSDK), "-o", aar, a.PkgPath)...); err != nil {
 		return "", err
 	}
 	r.step = binder.step
 	unpacked := filepath.Join(work, "aar")
-	if err := r.do("unpack the bindings and native libraries", func() error { return unpackAAR(aar, unpacked) }); err != nil {
+	if err := r.do("unpack the bindings and native libraries", func() error {
+		if err := unpackAAR(aar, unpacked); err != nil {
+			return err
+		}
+		return checkAARABIs(filepath.Join(unpacked, "jni"), a.ABIs)
+	}); err != nil {
 		return "", err
 	}
 	if err := r.do("verify 16 KiB Android native-library alignment", func() error {
@@ -222,10 +267,11 @@ func buildAndroid(r *runner, a app, out string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := r.run("link the manifest into a base APK", sdk.tool("aapt2"),
-		append([]string{"link", "-o", base, "--manifest", manifest, "-I", sdk.androidJar,
-			"--min-sdk-version", strconv.Itoa(a.MinSDK), "--target-sdk-version", strconv.Itoa(a.TargetSDK),
-			"--version-code", strconv.Itoa(a.VersionCode), "--version-name", a.Version}, resourceArgs...)...); err != nil {
+	if o.release() {
+		return releaseAndroid(r, sdk, a, o, out, androidReleaseInputs{work: work, manifest: manifest,
+			dexFile: filepath.Join(dex, "classes.dex"), jniDir: filepath.Join(unpacked, "jni"), resourceArgs: resourceArgs}, cert)
+	}
+	if err := r.run("link the manifest into a base APK", sdk.tool("aapt2"), aapt2LinkArgs(sdk, a, manifest, base, resourceArgs, false)...); err != nil {
 		return "", err
 	}
 	unsigned := filepath.Join(work, "android", "unsigned.apk")
@@ -261,6 +307,9 @@ func runAndroid(r *runner, a app, apk string, opts runOpts) error {
 		return err
 	}
 	if err := r.run("install the app", sdk.adb, "-s", serial, "install", "-r", "--no-incremental", apk); err != nil {
+		if a.Profile == profileRelease {
+			return fmt.Errorf("%w\n    (INSTALL_FAILED_UPDATE_INCOMPATIBLE means a build signed with another key, such as a debug build, holds %s; use a different --id, or remove that app yourself)", err, a.ID)
+		}
 		return err
 	}
 	if err := r.run("launch the app", sdk.adb, "-s", serial, "shell", "am", "start", "-W", "-n", a.ID+"/.MainActivity"); err != nil {

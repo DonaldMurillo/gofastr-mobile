@@ -25,6 +25,32 @@ type runner struct {
 	env  []string
 	step int
 	dir  string
+	// probe and getenv replace doctor's read-only queries and environment
+	// reads in tests. Nil means run the command (quietOutput) and read the
+	// real environment.
+	probe  func(name string, args ...string) (string, error)
+	getenv func(string) string
+}
+
+// query runs a read-only doctor probe: no step header, stdout only.
+func (r *runner) query(name string, args ...string) (string, error) {
+	if r.probe != nil {
+		return r.probe(name, args...)
+	}
+	if (strings.EqualFold(filepath.Base(name), "go") || strings.EqualFold(filepath.Base(name), "go.exe")) && len(args) > 0 && args[0] == "list" {
+		// Ambient GOFLAGS=-mod=mod must not let a doctor probe update the
+		// consuming app's manifests. Preserve vendor mode when applicable.
+		mode := readOnlyModuleFlag(r.ctx, r.dir)
+		args = append([]string{"list", mode}, args[1:]...)
+	}
+	return r.quietOutput(name, args...)
+}
+
+func (r *runner) envValue(key string) string {
+	if r.getenv != nil {
+		return r.getenv(key)
+	}
+	return os.Getenv(key)
 }
 
 func (r *runner) header(desc string) {

@@ -2,9 +2,11 @@
 // on the iOS simulator or an Android emulator, from the command line: no
 // Xcode project, no Gradle, no IDE. PROTOTYPE.
 //
-//	gofastr-native doctor [--platform ios-sim|android-emu]
-//	gofastr-native build  --platform ios-sim|android-emu --pkg ./examples/notes/notesmobile
-//	gofastr-native run    --platform ios-sim|android-emu --pkg ./examples/notes/notesmobile [--screenshot shot.png]
+//	gofastr-native doctor [--platform ios-sim|android-emu|ios-device] [--devices]
+//	gofastr-native init --out ../myapp
+//	gofastr-native dev --platform android-emu|ios-sim|go --pkg <bind package>
+//	gofastr-native build  --platform ios-sim|android-emu|ios-device --pkg ./examples/notes/notesmobile [--profile release ...]
+//	gofastr-native run    --platform ios-sim|android-emu|ios-device --pkg ./examples/notes/notesmobile [--screenshot shot.png]
 //
 // Run it from the Go module that holds the bind package (the module must
 // require golang.org/x/mobile; this one pins it with a tool directive).
@@ -20,23 +22,29 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
-	"time"
 )
 
 const usage = `gofastr-native builds a GoFastr app into a phone app and runs it.
 
 Usage:
-  gofastr-native doctor [--platform ios-sim|android-emu|ios-device]
+  gofastr-native doctor [--platform ios-sim|android-emu|ios-device] [--devices]
+  gofastr-native init   --out <new-directory> [--module <path>] [--package <name>]
+                       [--id <id>] [--name <name>] [--native <checkout|version>] [--dry-run]
+  gofastr-native dev    --platform android-emu|ios-sim|go --pkg <bind package> [app flags]
+                       [--test] [--no-checkpoint] [--poll 500ms] [--settle 400ms] [--dry-run]
   gofastr-native extension check --pkg <Go package> [--dry-run]
   gofastr-native extension init --name <namespace/v1> --out <new-directory> [--kind file|component] [--dry-run]
-  gofastr-native build  --platform ios-sim|android-emu --pkg <bind package> [flags]
-  gofastr-native run    --platform ios-sim|android-emu --pkg <bind package> [flags]
+  gofastr-native inspect --pkg <bind package> [--profile uikit|android|webview|minimal|all]
+                        [--route /path] [--depth 4] [--max-screens 200] [--json] [--dry-run]
+  gofastr-native build  --platform ios-sim|android-emu|ios-device --pkg <bind package> [flags]
+  gofastr-native run    --platform ios-sim|android-emu|ios-device --pkg <bind package> [flags]
 
 Flags (build, run):
   --platform    ios-sim (iOS simulator, needs a Mac with Xcode installed)
-                android-emu (Android emulator or attached device, needs the
-                Android SDK, NDK and a JDK)
+                android-emu, or android (Android emulator or attached device,
+                needs the Android SDK, NDK and a JDK)
+                ios-device (signed iPhone build and IPA, needs a Mac, your
+                signing identity and provisioning profiles)
   --pkg         the bind package: webview uses Start, Stop, Handle, Open,
                 Bridge; native uses Start, Stop, Root, Render, Dispatch
                 (see examples/notes/notesnative)
@@ -56,11 +64,38 @@ Flags (build, run):
   --widgets     package a home-screen widget; requires --url-scheme
   --app-group   iOS app-group identifier for share and widget extensions
   --dry-run     print every step without running it
+  --debug-trace enable redacted Go runtime traces in instrumented native apps
+                (debug builds only; see docs/debugging.md)
+  --profile     debug (default) or release; see docs/release.md
+  --build-number  Android versionCode / iOS CFBundleVersion, 1-2100000000
+                (default 1; required with --profile release)
+  --abi         Android ABIs: arm64-v8a,x86_64 (default both)
+  --package     Android artifacts: apk (default), aab, or apk,aab (release)
+  --bundletool  your bundletool.jar for --package aab (or $GOFASTR_BUNDLETOOL)
+
+Flags (Android release signing; passwords stay in environment variables):
+  --keystore    your release (upload) keystore; never the debug keystore
+  --key-alias   the key's alias in that keystore
+  --keystore-pass-env  name of the variable holding the keystore password
+  --key-pass-env       name of the variable holding the key password
+                (default: --keystore-pass-env)
+
+Flags (ios-device signing):
+  --team-id     your 10-character Apple team ID
+  --sign-identity  codesigning identity: SHA-1 (recommended) or exact name
+  --keychain    keychain holding the identity (optional; never unlocked)
+  --provisioning-profile  app profile: development (debug) or ad hoc (release)
+  --share-provisioning-profile   profile for <id>.Share (with --receive-shares)
+  --widget-provisioning-profile  profile for <id>.Widget (with --widgets)
 
 Flags (run only):
-  --device      simulator name or UDID / adb serial or AVD name
+  --device      simulator name or UDID / adb serial or AVD name /
+                exact CoreDevice identifier or UDID (required for ios-device)
   --screenshot  write a screenshot here once the app is up
   --wait        how long to wait before the screenshot (default 8s)
+
+Flags (doctor):
+  --devices     list attached Android devices and boot state (starts the adb server)
 
 Flags (doctor --platform ios-device only):
   --app         existing signed physical-device .app bundle (never modified)
@@ -83,34 +118,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	sub, rest := args[0], args[1:]
-	if sub == "extension" {
+	switch sub {
+	case "extension":
 		return extensionCommand(ctx, rest, stdout, stderr)
+	case "init":
+		return initCommand(ctx, rest, stdout, stderr)
+	case "dev":
+		return devCommand(ctx, rest, stdout, stderr)
+	case "inspect":
+		return inspectCommand(ctx, rest, stdout, stderr)
 	}
 	fs := flag.NewFlagSet(sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprint(stderr, usage) }
-	platform := fs.String("platform", "", "ios-sim or android-emu")
-	pkg := fs.String("pkg", "", "bind package")
-	id := fs.String("id", "", "bundle / application id")
-	name := fs.String("name", "", "home-screen name")
-	version := fs.String("version", "", "app version")
-	out := fs.String("out", "", "output directory")
-	hostTemplate := fs.String("host-template", "", "caller-owned native host template")
-	renderer := fs.String("renderer", "webview", "webview or native (iOS/Android)")
-	cameraUsage := fs.String("camera-usage", defaultCameraUsage, "iOS camera purpose string; empty disables native camera")
-	microphoneUsage := fs.String("microphone-usage", "", "iOS microphone purpose string; empty disables recording")
-	urlScheme := fs.String("url-scheme", "", "application-specific deep-link scheme (native renderer)")
-	receiveShares := fs.Bool("receive-shares", false, "enable the private incoming-share inbox")
-	secureStorage := fs.Bool("secure-storage", false, "enable secure storage and authentication")
-	biometricUsage := fs.String("biometric-usage", "", "Face ID purpose text")
-	widgets := fs.Bool("widgets", false, "package a home-screen widget")
-	appGroup := fs.String("app-group", "", "iOS app-group identifier")
-	dry := fs.Bool("dry-run", false, "print the steps only")
-	device := fs.String("device", "", "simulator / device / AVD")
-	shot := fs.String("screenshot", "", "screenshot path")
-	existingApp := fs.String("app", "", "existing signed iOS device app (doctor only)")
-	require := fs.String("require", "", "required iOS device features (doctor only)")
-	wait := fs.Duration("wait", 8*time.Second, "wait before the screenshot")
+	f := registerBuildFlags(fs)
+	rel := addReleaseFlags(fs)
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
@@ -118,111 +140,48 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unexpected arguments: %v\n", fs.Args())
 		return 2
 	}
-	r := &runner{ctx: ctx, out: stdout, dryRun: *dry}
-	if (*existingApp != "" || *require != "") && (sub != "doctor" || *platform != "ios-device") {
-		fmt.Fprintln(stderr, "--app and --require are only supported by doctor --platform ios-device")
-		return 2
-	}
-
+	r := &runner{ctx: ctx, out: stdout, dryRun: *f.dry}
 	switch sub {
-	case "doctor":
-		if *platform == "ios-device" {
-			return doctorIOSDevice(r, deviceDoctorOptions{app: *existingApp, pkg: *pkg, device: *device, scheme: *urlScheme, require: *require}, stderr)
-		}
-		if *platform != "" && *platform != "ios-sim" && *platform != "android-emu" {
-			fmt.Fprintln(stderr, "doctor --platform must be ios-sim, android-emu, or ios-device")
-			return 2
-		}
-		return doctor(r, *platform)
-	case "build", "run":
+	case "doctor", "build", "run":
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", sub, usage)
 		return 2
 	}
-	if *platform != "ios-sim" && *platform != "android-emu" {
-		fmt.Fprintln(stderr, "--platform must be ios-sim or android-emu")
+	if name := rel.anyGiven(); name != "" && sub == "doctor" {
+		fmt.Fprintf(stderr, "--%s applies only to build and run\n", name)
 		return 2
 	}
-	if *pkg == "" {
-		fmt.Fprintln(stderr, "--pkg is required (for this module: --pkg ./examples/notes/notesmobile)")
-		return 2
+	if code := f.validate(sub, stderr); code != 0 {
+		return code
 	}
-	if *renderer != "webview" && *renderer != "native" {
-		fmt.Fprintln(stderr, "--renderer must be webview or native")
-		return 2
-	}
-	if *renderer == "native" && *hostTemplate != "" {
-		fmt.Fprintln(stderr, "--renderer native cannot use --host-template")
-		return 2
-	}
-	if err := validateURLScheme(*urlScheme); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	if *urlScheme != "" && *renderer != "native" {
-		fmt.Fprintln(stderr, "--url-scheme requires --renderer native")
-		return 2
-	}
-	if *wait < 0 {
-		fmt.Fprintln(stderr, "--wait must not be negative")
-		return 2
-	}
-	if err := validateCameraUsage(*cameraUsage); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	if err := validateMicrophoneUsage(*microphoneUsage); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	if strings.TrimSpace(*microphoneUsage) != "" && *platform == "android-emu" && *renderer != "native" {
-		fmt.Fprintln(stderr, "--microphone-usage on Android requires --renderer native")
-		return 2
-	}
-	if *hostTemplate != "" {
-		resolved, err := filepath.Abs(*hostTemplate)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
+	if sub == "doctor" {
+		if *f.platform == "ios-device" {
+			return doctorIOSDevice(r, deviceDoctorOptions{app: *f.existingApp, pkg: *f.pkg, device: *f.device, scheme: *f.urlScheme, require: *f.require}, stderr)
+		}
+		if *f.platform != "" && *f.platform != "ios-sim" && *f.platform != "android-emu" {
+			fmt.Fprintln(stderr, "doctor --platform must be ios-sim, android-emu, or ios-device")
 			return 2
 		}
-		info, err := os.Stat(resolved)
-		if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
-			fmt.Fprintln(stderr, "--host-template must be a readable regular file under 1 MB")
-			return 2
-		}
-		*hostTemplate = resolved
+		return doctorWithOptions(r, doctorOptions{platform: *f.platform, devices: *f.devices})
 	}
-	pkgPath, pkgName, err := resolvePkg(r, *pkg)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	a, code := f.resolveApp(r, stderr)
+	if code != 0 {
+		return code
 	}
-	a, err := newApp(pkgPath, pkgName, *id, *name, *version)
+	release, dir, err := rel.resolve(releaseContext{sub: sub, platform: *f.platform, out: *f.out, device: *f.device, screenshot: *f.shot, dryRun: r.dryRun}, &a)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	a.HostTemplate = *hostTemplate
-	a.Renderer = *renderer
-	a.CameraUsage = strings.TrimSpace(*cameraUsage)
-	a.MicrophoneUsage = strings.TrimSpace(*microphoneUsage)
-	a.URLScheme = *urlScheme
-	a.ReceiveShares, a.SecureStorage, a.Widgets = *receiveShares, *secureStorage, *widgets
-	a.BiometricUsage, a.AppGroup = strings.TrimSpace(*biometricUsage), *appGroup
-	if err := validateDeviceFeatures(a, *platform); err != nil {
+	if _, err := debugTraceBindFlags(a.DebugTrace, release.release(), a.Renderer); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	dir := *out
-	if dir == "" {
-		dir = filepath.Join("dist", "mobile", *platform)
+	if a.DebugTrace {
+		fmt.Fprintln(stdout, "Debug trace enabled for instrumented native bind packages.")
 	}
-	if dir, err = filepath.Abs(dir); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if *shot != "" {
-		if *shot, err = filepath.Abs(*shot); err != nil {
+	if *f.shot != "" {
+		if *f.shot, err = filepath.Abs(*f.shot); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
@@ -234,17 +193,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintf(stdout, "gofastr-native %s: %s (%s) from %s\n", sub, a.Name, a.ID, a.PkgPath)
-	opts := runOpts{device: *device, screenshot: *shot, wait: *wait}
+	opts := runOpts{device: *f.device, screenshot: *f.shot, wait: *f.wait}
 
 	var artifact string
-	switch *platform {
+	switch *f.platform {
 	case "ios-sim":
 		if artifact, err = buildIOS(r, a, dir); err == nil && sub == "run" {
 			err = runIOS(r, a.forIOS(), artifact, opts)
 		}
+	case "ios-device":
+		if artifact, err = buildIOSDevice(r, a, dir, release); err == nil && sub == "run" {
+			err = runIOSDevice(r, a, artifact, opts)
+		}
 	case "android-emu":
-		if artifact, err = buildAndroid(r, a, dir); err == nil && sub == "run" {
-			err = runAndroid(r, a, artifact, opts)
+		if artifact, err = buildAndroidProfile(r, a, dir, release); err == nil && sub == "run" {
+			err = runAndroidProfile(r, a, artifact, opts, release)
 		}
 	}
 	if err != nil {
