@@ -252,9 +252,9 @@ func TestJoins(t *testing.T) {
 		prev, next string
 		want       bool
 	}{
-		{"🇯", "🇵", true},     // a lone regional indicator pairs with the next
-		{"🇯🇵", "🇺", false},   // a complete flag does not take a third
-		{"e", "́", true}, // a combining mark extends its base
+		{"🇯", "🇵", true},   // a lone regional indicator pairs with the next
+		{"🇯🇵", "🇺", false}, // a complete flag does not take a third
+		{"e", "́", true},   // a combining mark extends its base
 		{"👩‍", "💻", true},
 		{"👩", "💻", false},
 		{"ᄀ", "ᅡ", true}, // Hangul L then V

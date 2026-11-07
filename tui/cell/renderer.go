@@ -45,9 +45,9 @@ type Renderer struct {
 	cursorValid bool
 	// last is the cell text written just before the cursor, while no
 	// cursor movement has happened since; the next cell must not join it.
-	last  string
-	shown bool
-	shownValid  bool
+	last       string
+	shown      bool
+	shownValid bool
 }
 
 // NewRenderer returns a renderer for a width by height screen. The first

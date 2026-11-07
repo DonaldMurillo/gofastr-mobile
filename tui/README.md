@@ -10,7 +10,7 @@ Each layer depends only on the layers below it.
 
 | Package | Owns | Status |
 |---|---|---|
-| `app` | Event loop, redraw scheduling, `Post` and `Every` for background work, OSC 52 copy | done |
+| `app` | Event loop, redraw scheduling, `Post`, `After` and `Every` for background work, OSC 52 copy | done |
 | `widget` | Text, flex, box, panel, button, input, textarea, scroll, list, table, split, tabs, sparkline, modal | done |
 | `view` | Element tree reconciled by key, focus and traps, hit testing, pointer capture, hover, selection, layers | done |
 | `layout` | Constraints down, sizes up; sizing rules and space distribution | done |
@@ -102,7 +102,9 @@ the visible rows.
 screen, bracketed paste, focus events and the kitty keyboard protocol, then
 reads input on a goroutine. Everything that touches the tree runs on one loop
 goroutine; `Post` hands it work from elsewhere and `Every` posts on a timer,
-dropping ticks while one is still queued. After any event that changed
+dropping ticks while one is still queued. `After` posts once after a delay and
+returns an idempotent cancellation function. `Options.Copied` reports mouse
+selection copies on the loop. See [API behavior](docs/app-and-rendering.md). After any event that changed
 state the loop rebuilds the tree before the next event. A burst of events
 still costs one terminal write, because the loop drains the queue before
 flushing. Ctrl+C quits and ctrl+z suspends unless a widget or `Unhandled`
@@ -223,7 +225,8 @@ What the tests cover:
   widening) and per-code-point advance.
 - `term`: raw mode and exact termios restore, size, unbuffered binary-clean
   reads, read timeout, `Close` interrupting a blocked read, and restore order,
-  all against a real pseudo-terminal on macOS and Linux.
+  all against a real pseudo-terminal on macOS and Linux. The app subprocess
+  tests also check exact termios and private-mode restore across suspend/resume.
 - `layout` and `view`: space distribution, keyed reconcile keeping state
   across reorders, hit testing through layers and clips, capture, hover
   enter and leave, click counting, focus order, traps and restore, and text
@@ -234,9 +237,12 @@ What the tests cover:
   regression. Mutation checks confirmed that tests fail when the
   release-inside-button check or the modal's Tab trap is removed.
 - `app`: the loop on a pty: typing and clicking, `Post` from another
-  goroutine, `Every`, `Unhandled`, selection copied as OSC 52, resize, and
+  goroutine, `Every`, cancellable `After`, `Unhandled`, selection copied as
+  OSC 52 with `Copied`, resize, and
   terminal restore after a panic. A mutation check confirmed the typing test
-  fails without the rebuild between events.
+  fails without the rebuild between events. Isolated child sessions with
+  controlling ptys test SIGTSTP/SIGCONT suspend/resume and kernel-delivered
+  SIGWINCH after `TIOCSWINSZ`.
 - `cmd/netmon`: the lsof, `/proc/net` (IPv4, IPv6 and IPv4-mapped),
   netstat and tasklist parsers against fixtures, and the model driven through
   a real tree: filter, sort by key and by header click, selection tracking
@@ -254,10 +260,6 @@ What the tests cover:
 Not yet verified: Windows has been compiled and vetted, not run, and so has
 netmon's netstat source. The console
 input path, including the mouse record conversion, needs a real Windows
-Terminal and conhost session. SIGWINCH delivery and `Suspend` have not been
-exercised by an automated test. The probe's terminal table and the
+Terminal and conhost session. The probe's terminal table and the
 cluster-width rules come from documentation, not from runs against each
-terminal; the per-terminal results still need checking by hand. Two clusters
-drawn into adjacent cells by separate `Set` calls can merge on a mode 2027
-terminal (two lone regional indicators become a flag), and the renderer does
-not guard against that yet.
+terminal; the per-terminal results still need checking by hand.
