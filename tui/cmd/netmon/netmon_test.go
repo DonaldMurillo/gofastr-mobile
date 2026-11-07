@@ -16,6 +16,7 @@ import (
 	"github.com/DonaldMurillo/gofastr-native/tui/input"
 	"github.com/DonaldMurillo/gofastr-native/tui/uni"
 	"github.com/DonaldMurillo/gofastr-native/tui/view"
+	"github.com/DonaldMurillo/gofastr-native/tui/widget"
 )
 
 func TestParseLsof(t *testing.T) {
@@ -159,9 +160,28 @@ func TestFakeSourceChurns(t *testing.T) {
 
 // fakeHost stands in for the app loop.
 type fakeHost struct {
-	tree  *view.Tree
-	posts chan func()
-	quit  bool
+	tree   *view.Tree
+	posts  chan func()
+	quit   bool
+	timers []*pendingTimer
+}
+
+type pendingTimer struct {
+	delay time.Duration
+	fn    func()
+}
+
+func (h *fakeHost) After(delay time.Duration, fn func()) func() {
+	timer := &pendingTimer{delay: delay, fn: fn}
+	h.timers = append(h.timers, timer)
+	return func() { timer.fn = nil }
+}
+
+func (timer *pendingTimer) fire() {
+	if fn := timer.fn; fn != nil {
+		timer.fn = nil
+		fn()
+	}
 }
 
 func (h *fakeHost) Post(fn func())   { h.posts <- fn }
@@ -192,6 +212,7 @@ func newScreen(t *testing.T, source Source) *screen {
 	}
 	s.m = newModel(source, time.Second, func() time.Time { return s.now })
 	s.m.host = s.host
+	s.host.tree.OnCopy = s.m.copied
 	s.frame()
 	return s
 }
@@ -485,6 +506,8 @@ func TestErrorKeepsLastRows(t *testing.T) {
 	if !s.shows("lsof failed") {
 		t.Fatalf("no error shown:\n%s", s.text())
 	}
+	s.host.timers[0].fire()
+	s.frame()
 	s.wantProcesses("cupsd", "firefox")
 	s.load(cups)
 	if s.shows("lsof failed") {
@@ -499,6 +522,10 @@ func TestHelpOpensAndCloses(t *testing.T) {
 	if !s.shows("move the selection") {
 		t.Fatalf("no help:\n%s", s.text())
 	}
+	button, ok := s.host.tree.Focused().Widget().(widget.Button)
+	if !ok || button.Label != "Close" || button.Variant != widget.ButtonPrimary {
+		t.Fatalf("default focus is not the primary Close button: %#v", s.host.tree.Focused().Widget())
+	}
 	s.typed("q") // the modal traps keys
 	if s.host.quit {
 		t.Fatal("q reached the table through the modal")
@@ -506,6 +533,9 @@ func TestHelpOpensAndCloses(t *testing.T) {
 	s.key(input.KeyEscape)
 	if s.m.help || s.shows("move the selection") {
 		t.Fatalf("help still open:\n%s", s.text())
+	}
+	if !s.m.focusIn("table") {
+		t.Fatal("Escape did not restore table focus")
 	}
 	s.typed("?")
 	x, y := s.find("Close")
@@ -585,9 +615,166 @@ func TestDetailsFitAStandardTerminal(t *testing.T) {
 	s := newScreen(t, nil)
 	s.buf.Resize(80, 24)
 	s.load(cups, firefox, mdns)
+	s.m.copied("socket")
+	s.frame()
+	if !s.shows("Copied") || !s.m.focusIn("table") {
+		t.Fatalf("80x24 toast missing or took focus:\n%s", s.text())
+	}
 	for _, want := range []string{"Process", "Protocol", "Local ", "Remote ", "State ", "Seen for", "q quit"} {
 		if !s.shows(want) {
 			t.Errorf("80x24 lacks %q:\n%s", want, s.text())
 		}
+	}
+}
+
+func TestNoticesAppearAndAutoDismiss(t *testing.T) {
+	for _, test := range []struct {
+		name, title, text string
+		level             widget.NoticeLevel
+		trigger           func(*screen)
+	}{
+		{name: "error", title: "Refresh failed", text: "permission denied", level: widget.NoticeError, trigger: func(s *screen) {
+			s.m.apply(nil, errors.New("permission denied"))
+		}},
+		{name: "recovery", title: "Refreshing again", level: widget.NoticeSuccess, trigger: func(s *screen) {
+			s.m.apply(nil, errors.New("permission denied"))
+			s.host.timers[0].fire()
+			s.load(cups)
+		}},
+		{name: "pause", title: "Paused", level: widget.NoticeInfo, trigger: func(s *screen) { s.typed("p") }},
+		{name: "resume", title: "Resumed", level: widget.NoticeInfo, trigger: func(s *screen) {
+			s.typed("p")
+			s.host.timers[0].fire()
+			s.typed("p")
+		}},
+		{name: "copy", title: "Copied", text: "3 characters", level: widget.NoticeSuccess, trigger: func(s *screen) { s.m.copied("a界🙂") }},
+		{name: "busy", title: "Already refreshing", level: widget.NoticeInfo, trigger: func(s *screen) {
+			s.m.busy = true
+			s.typed("r")
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s := newScreen(t, nil)
+			s.load(cups, firefox)
+			test.trigger(s)
+			s.frame()
+			if !s.shows(test.title) || !s.shows(test.text) {
+				t.Fatalf("notice missing:\n%s", s.text())
+			}
+			x, y := s.find(test.title)
+			if x < s.buf.Width()-40 || y != 1 {
+				t.Fatalf("notice at %d,%d, want top-right", x, y)
+			}
+			items := s.m.notices.Items()
+			if len(items) != 1 || items[0].Level != test.level || items[0].Text != test.text {
+				t.Fatalf("notices %+v", items)
+			}
+			if !s.m.focusIn("table") {
+				t.Fatal("notice took table focus")
+			}
+			timer := s.host.timers[len(s.host.timers)-1]
+			if timer.delay != 4*time.Second {
+				t.Fatalf("notice timeout %v, want 4s", timer.delay)
+			}
+			timer.fire()
+			s.frame()
+			if s.m.notices.Len() != 0 || s.shows(test.title) {
+				t.Fatalf("notice stayed after timeout:\n%s", s.text())
+			}
+			if test.name == "error" && !s.shows("permission denied") {
+				t.Fatal("header error disappeared with the notice")
+			}
+		})
+	}
+}
+
+func TestRefreshNoticesOnlyOnErrorChanges(t *testing.T) {
+	s := newScreen(t, nil)
+	s.load(cups)
+	for range 3 {
+		s.m.apply(nil, errors.New("permission denied"))
+	}
+	if len(s.host.timers) != 1 || s.m.notices.Len() != 1 {
+		t.Fatalf("identical errors created %d timers and %d notices", len(s.host.timers), s.m.notices.Len())
+	}
+	s.host.timers[0].fire()
+	s.m.apply(nil, errors.New("permission denied"))
+	if len(s.host.timers) != 1 || s.m.notices.Len() != 0 {
+		t.Fatal("persistent error reappeared after dismissal")
+	}
+	s.m.apply(nil, errors.New("source unavailable"))
+	s.frame()
+	if len(s.host.timers) != 2 || !s.shows("source unavailable") {
+		t.Fatal("changed error did not produce a new notice")
+	}
+	s.host.timers[1].fire()
+	s.load(cups)
+	if !s.shows("Refreshing again") {
+		t.Fatal("recovery notice missing")
+	}
+	s.load(cups)
+	if len(s.host.timers) != 3 {
+		t.Fatal("successful refresh repeated the recovery notice")
+	}
+	s.m.apply(nil, errors.New("source unavailable"))
+	if len(s.host.timers) != 4 {
+		t.Fatal("same error after recovery did not produce a notice")
+	}
+}
+
+func TestClickNoticeDismissesWithoutTakingFocus(t *testing.T) {
+	s := newScreen(t, nil)
+	s.load(cups)
+	s.m.copied("socket")
+	s.frame()
+	x, y := s.find("Copied")
+	s.send(press(x, y), release(x, y))
+	if s.shows("Copied") || s.m.notices.Len() != 0 {
+		t.Fatal("click did not dismiss the notice")
+	}
+	if !s.m.focusIn("table") {
+		t.Fatal("clicking a notice took table focus")
+	}
+	s.m.copied("another socket")
+	s.host.timers[0].fire()
+	s.frame()
+	if !s.shows("Copied") || s.m.notices.Len() != 1 {
+		t.Fatal("old timer dismissed the new notice")
+	}
+}
+
+func TestNoticeDoesNotBlockFilter(t *testing.T) {
+	s := newScreen(t, nil)
+	s.load(cups)
+	s.m.copied("socket")
+	s.frame()
+	s.typed("/cups")
+	if !s.m.focusIn("filter") || s.m.filter != "cups" || !s.shows("Copied") {
+		t.Fatalf("notice blocked filtering:\n%s", s.text())
+	}
+}
+
+func TestMouseSelectionShowsCopiedNotice(t *testing.T) {
+	s := newScreen(t, nil)
+	s.load(cups)
+	x, y := s.find("Seen for")
+	s.send(press(x, y), input.Mouse{X: x + 3, Y: y, Button: input.ButtonLeft, Action: input.MouseDrag}, release(x+3, y))
+	if !s.shows("Copied") || !s.shows("4 characters") {
+		t.Fatalf("mouse copy notice missing:\n%s", s.text())
+	}
+}
+
+func TestHelpDialogAboveNoticeAndEnterCloses(t *testing.T) {
+	s := newScreen(t, nil)
+	s.load(cups)
+	s.m.copied("socket")
+	s.frame()
+	s.typed("?")
+	if !s.shows("Keys") || !s.shows("move the selection") {
+		t.Fatalf("notice obscured help:\n%s", s.text())
+	}
+	s.key(input.KeyEnter)
+	if s.m.help || !s.m.focusIn("table") || !s.shows("Copied") {
+		t.Fatalf("Enter did not close help and restore table focus:\n%s", s.text())
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DonaldMurillo/gofastr-native/tui/cell"
 	"github.com/DonaldMurillo/gofastr-native/tui/input"
@@ -21,6 +22,7 @@ type host interface {
 	Post(func())
 	Quit()
 	Tree() *view.Tree
+	After(time.Duration, func()) func()
 }
 
 const (
@@ -65,6 +67,7 @@ type model struct {
 	selected string // key of the selected row
 	index    int    // its position in rows, -1 for none
 	help     bool
+	notices  widget.Notifications
 }
 
 func newModel(source Source, interval time.Duration, now func() time.Time) *model {
@@ -95,8 +98,14 @@ func (m *model) tick() {
 func (m *model) apply(conns []Conn, err error) {
 	m.busy = false
 	if err != nil {
+		if m.err == nil || m.err.Error() != err.Error() {
+			m.notify(widget.NoticeError, "Refresh failed", err.Error())
+		}
 		m.err = err
 		return
+	}
+	if m.err != nil {
+		m.notify(widget.NoticeSuccess, "Refreshing again", "")
 	}
 	m.err = nil
 	now := m.now()
@@ -120,6 +129,15 @@ func (m *model) apply(conns []Conn, err error) {
 		m.history = m.history[len(m.history)-historyLength:]
 	}
 	m.rebuild()
+}
+
+func (m *model) notify(level widget.NoticeLevel, title, text string) {
+	id := m.notices.Push(level, title, text)
+	m.host.After(4*time.Second, func() { m.notices.Dismiss(id) })
+}
+
+func (m *model) copied(text string) {
+	m.notify(widget.NoticeSuccess, "Copied", fmt.Sprintf("%d characters", utf8.RuneCountInString(text)))
 }
 
 func field(c Conn, col int) string {
@@ -249,8 +267,17 @@ func (m *model) key(k input.Key) bool {
 		m.host.Quit()
 	case r == 'p':
 		m.paused = !m.paused
+		if m.paused {
+			m.notify(widget.NoticeInfo, "Paused", "")
+		} else {
+			m.notify(widget.NoticeInfo, "Resumed", "")
+		}
 	case r == 'r':
-		m.refresh()
+		if m.busy {
+			m.notify(widget.NoticeInfo, "Already refreshing", "")
+		} else {
+			m.refresh()
+		}
 	case r == '?':
 		m.help = true
 	case r >= '1' && r <= '0'+rune(len(columns)):
@@ -289,7 +316,7 @@ func (m *model) view() view.Element {
 		widget.Grow(1, view.E(widget.Split{Dir: widget.Vertical, Percent: 62, Min: 3, First: m.table(), Second: m.details()})),
 		m.footer(),
 	)
-	return widget.OnKey(m.key, widget.Layers(main, view.If(m.help, m.helpDialog())))
+	return widget.OnKey(m.key, widget.Layers(main, m.notices.Element(), view.If(m.help, m.helpDialog())))
 }
 
 func (m *model) header() view.Element {
@@ -428,12 +455,13 @@ func (m *model) helpDialog() view.Element {
 		"Drag across text to copy it",
 		"q or ctrl+c quits",
 	}
-	rows := make([]view.Element, 0, len(lines)+2)
+	rows := make([]view.Element, 0, len(lines))
 	for _, l := range lines {
 		rows = append(rows, widget.Label(l))
 	}
-	rows = append(rows, widget.Label(""), view.E(widget.Flex{Justify: layout.End}, widget.NewButton("Close", closeHelp)))
-	return view.E(widget.Modal{OnClose: closeHelp},
-		view.E(widget.Box{Border: widget.BorderRounded, Title: "Keys", Padding: layout.Symmetric(0, 2)}, widget.Column(rows...)),
-	)
+	return (widget.Dialog{
+		Title: "Keys", Body: widget.Column(rows...), Width: 76,
+		Buttons: []widget.DialogButton{{Label: "Close", Variant: widget.ButtonPrimary, Default: true, OnClick: closeHelp}},
+		OnClose: closeHelp,
+	}).Element()
 }

@@ -27,6 +27,7 @@ func main() {
 	}
 	m := newModel(source, max(*every, 100*time.Millisecond), time.Now)
 	err := app.Run(func(*app.App) view.Element { return m.view() }, app.Options{
+		Copied: func(_ *app.App, text string) { m.copied(text) },
 		Start: func(a *app.App) {
 			m.host = a
 			m.refresh()
