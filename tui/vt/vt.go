@@ -10,6 +10,7 @@
 package vt
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
@@ -37,6 +38,8 @@ type Screen struct {
 	// Replies collects what the terminal sends back to queries. A test
 	// harness drains it into the program's input.
 	Replies []byte
+	// Clipboard holds the last text a program set with OSC 52.
+	Clipboard string
 
 	cells       []cell.Cell
 	pen         cell.Style
@@ -214,6 +217,16 @@ func (s *Screen) endString() {
 			return
 		}
 		s.pen.Link = uri
+		return
+	}
+	if rest, ok := strings.CutPrefix(body, "52;"); ok {
+		_, data, _ := strings.Cut(rest, ";")
+		text, err := base64.StdEncoding.DecodeString(data)
+		if err != nil {
+			s.errorf("malformed OSC 52 %q", body)
+			return
+		}
+		s.Clipboard = string(text)
 		return
 	}
 	if body == "10;?" || body == "11;?" {
