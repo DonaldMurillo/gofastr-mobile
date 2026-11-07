@@ -43,8 +43,10 @@ type Options struct {
 	// NoDefaultKeys turns off the ctrl+c and ctrl+z defaults.
 	NoDefaultKeys bool
 	// Start runs on the loop before the first frame, for example to start
-	// background work with Every.
+	// background work with After or Every.
 	Start func(a *App)
+	// Copied runs on the loop after a mouse selection is copied with OSC 52.
+	Copied func(a *App, text string)
 }
 
 // App is a running program. Its methods other than Post and Quit must be
@@ -134,6 +136,42 @@ func (a *App) signal() {
 	}
 }
 
+// After posts fn to the loop once after d and redraws afterwards, unless
+// stop is called first or the app has quit. The returned stop is idempotent
+// and also cancels a callback already queued but not yet started.
+func (a *App) After(d time.Duration, fn func()) (stop func()) {
+	timer := time.NewTimer(d)
+	canceled := make(chan struct{})
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			timer.Stop()
+			close(canceled)
+		})
+	}
+	go func() {
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			a.Post(func() {
+				select {
+				case <-canceled:
+					return
+				case <-a.done:
+					return
+				default:
+					if !a.quitting() {
+						fn()
+					}
+				}
+			})
+		case <-canceled:
+		case <-a.done:
+		}
+	}()
+	return stop
+}
+
 // Every posts fn every d until the returned stop is called or the app
 // quits. Ticks that find the previous one still queued are dropped.
 func (a *App) Every(d time.Duration, fn func()) (stop func()) {
@@ -193,7 +231,7 @@ func (a *App) run(root func(*App) view.Element, signals <-chan os.Signal, opts O
 			return err
 		}
 	}
-	for _, m := range []term.Mode{term.AltScreen, term.NoAutowrap, term.BracketedPaste, term.FocusEvents, term.KittyKeyboard} {
+	for _, m := range []term.Mode{term.AltScreen, term.HideCursor, term.NoAutowrap, term.BracketedPaste, term.FocusEvents, term.KittyKeyboard} {
 		if err := a.term.Set(m, true); err != nil {
 			return err
 		}
@@ -202,7 +240,12 @@ func (a *App) run(root func(*App) view.Element, signals <-chan os.Signal, opts O
 		return err
 	}
 	a.tree = view.NewTree(caps.Method())
-	a.tree.OnCopy = a.Copy
+	a.tree.OnCopy = func(text string) {
+		a.Copy(text)
+		if opts.Copied != nil {
+			opts.Copied(a, text)
+		}
+	}
 	a.back = cell.NewBuffer(a.size.Cols, a.size.Rows)
 	a.renderer = cell.NewRenderer(a.size.Cols, a.size.Rows, caps.Options())
 	defer func() { a.term.Write(a.renderer.Reset()) }()

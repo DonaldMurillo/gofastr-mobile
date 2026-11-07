@@ -29,3 +29,8 @@ func Open() (master, slave *os.File, err error) {
 	}
 	return os.NewFile(uintptr(fd), "ptmx"), slave, nil
 }
+
+// Termios reads the device settings of a pty endpoint.
+func Termios(file *os.File) (*unix.Termios, error) {
+	return unix.IoctlGetTermios(int(file.Fd()), unix.TCGETS)
+}

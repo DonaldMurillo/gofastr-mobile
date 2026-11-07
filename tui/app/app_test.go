@@ -47,24 +47,7 @@ func start(t *testing.T, cols, rows int, root func(*App) view.Element, opts Opti
 		t.Fatal(err)
 	}
 	s := &session{t: t, master: master, term: terminal, screen: vt.New(cols, rows), signals: make(chan os.Signal, 1), done: make(chan any, 1)}
-	go func() {
-		buf := make([]byte, 8192)
-		for {
-			n, err := master.Read(buf)
-			s.mu.Lock()
-			s.screen.Write(buf[:n])
-			s.raw.Write(buf[:n])
-			replies := s.screen.Replies
-			s.screen.Replies = nil
-			s.mu.Unlock()
-			if len(replies) > 0 {
-				master.Write(replies)
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
+	go s.readOutput()
 	opts.Terminal, opts.Signals = terminal, s.signals
 	opts.Getenv = func(string) string { return "" }
 	go func() {
@@ -83,6 +66,25 @@ func start(t *testing.T, cols, rows int, root func(*App) view.Element, opts Opti
 		master.Close()
 	})
 	return s
+}
+
+func (s *session) readOutput() {
+	buf := make([]byte, 8192)
+	for {
+		n, err := s.master.Read(buf)
+		s.mu.Lock()
+		s.screen.Write(buf[:n])
+		s.raw.Write(buf[:n])
+		replies := s.screen.Replies
+		s.screen.Replies = nil
+		s.mu.Unlock()
+		if len(replies) > 0 {
+			s.master.Write(replies)
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (s *session) send(in string) {
@@ -217,6 +219,97 @@ func TestEveryTicksOnTheLoop(t *testing.T) {
 	}
 }
 
+func TestAfterFiresOnceOnTheLoopAndRedraws(t *testing.T) {
+	calls := 0
+	s := start(t, 20, 2, func(*App) view.Element {
+		return widget.Label(fmt.Sprintf("calls %d", calls))
+	}, Options{Start: func(a *App) {
+		a.After(20*time.Millisecond, func() { calls++ })
+	}})
+	s.waitFor("calls 1")
+	// Keep the loop running across several deadlines to catch a repeating
+	// timer. The root and callback share state without locks: -race also
+	// verifies that the callback runs on the loop.
+	time.Sleep(80 * time.Millisecond)
+	s.send("\x03")
+	if r := s.exit(); r != nil {
+		t.Fatalf("run returned %v", r)
+	}
+	if calls != 1 {
+		t.Fatalf("callback ran %d times", calls)
+	}
+}
+
+func TestAfterStopBeforeDeadline(t *testing.T) {
+	calls := 0
+	s := start(t, 20, 2, func(*App) view.Element { return widget.Label("waiting") }, Options{
+		Start: func(a *App) {
+			stop := a.After(20*time.Millisecond, func() { calls++ })
+			stop()
+			stop()
+		},
+	})
+	s.waitFor("waiting")
+	time.Sleep(80 * time.Millisecond)
+	s.send("\x03")
+	s.exit()
+	if calls != 0 {
+		t.Fatalf("canceled callback ran %d times", calls)
+	}
+}
+
+func TestAfterStopCancelsQueuedCallback(t *testing.T) {
+	calls := 0
+	queued := make(chan bool, 1)
+	s := start(t, 20, 2, func(*App) view.Element { return widget.Label("ready") }, Options{
+		Start: func(a *App) {
+			stop := a.After(0, func() { calls++ })
+			deadline := time.Now().Add(time.Second)
+			for {
+				a.mu.Lock()
+				pending := len(a.posts) != 0
+				a.mu.Unlock()
+				if pending || time.Now().After(deadline) {
+					queued <- pending
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			stop()
+		},
+	})
+	s.waitFor("ready")
+	if !<-queued {
+		t.Error("timer callback was never queued")
+	}
+	s.send("\x03")
+	s.exit()
+	if calls != 0 {
+		t.Fatalf("canceled queued callback ran %d times", calls)
+	}
+}
+
+func TestAfterDoesNotRunAfterQuit(t *testing.T) {
+	called := make(chan struct{}, 1)
+	var app *App
+	s := start(t, 20, 2, func(*App) view.Element { return widget.Label("ready") }, Options{
+		Start: func(a *App) {
+			app = a
+			a.After(time.Minute, func() { called <- struct{}{} })
+			a.Quit()
+			a.After(0, func() { called <- struct{}{} })
+		},
+	})
+	s.exit()
+	app.After(0, func() { called <- struct{}{} })
+	time.Sleep(20 * time.Millisecond)
+	select {
+	case <-called:
+		t.Fatal("callback ran after quit")
+	default:
+	}
+}
+
 func TestUnhandledSeesUnusedKeys(t *testing.T) {
 	var seen []string
 	s := start(t, 20, 2, func(*App) view.Element { return widget.Label("ready") }, Options{
@@ -239,12 +332,23 @@ func TestUnhandledSeesUnusedKeys(t *testing.T) {
 }
 
 func TestSelectionCopiesWithOSC52(t *testing.T) {
-	s := start(t, 20, 2, func(*App) view.Element { return widget.Label("copy me please") }, Options{})
+	var copied string
+	s := start(t, 20, 2, func(*App) view.Element {
+		return widget.Column(widget.Label("copy me please"), widget.Label("copied: "+copied))
+	}, Options{Copied: func(a *App, text string) {
+		copied = text
+		// This runs on the loop and redraws as part of the selection event.
+		a.Redraw()
+	}})
 	s.waitFor("copy me")
 	s.send(mouse(0, 0, 0, 'M') + mouse(32, 6, 0, 'M') + mouse(0, 6, 0, 'm'))
 	s.until("clipboard", func() bool { return s.screen.Clipboard == "copy me" })
+	s.waitFor("copied: copy me")
 	s.signals <- syscall.SIGTERM
 	s.exit()
+	if copied != "copy me" {
+		t.Fatalf("Copied received %q", copied)
+	}
 }
 
 func TestResizeRedraws(t *testing.T) {
