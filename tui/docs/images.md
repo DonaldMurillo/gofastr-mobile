@@ -109,8 +109,7 @@ The `vt.Screen` oracle records per-screen `Images`, `Placements`, and cell-pixel
 geometry. It accepts chunked kitty uploads/placements/deletions/queries, sixel
 raster metadata, and OSC 1337 PNGs; malformed sequences accumulate in `Errors`.
 Renderer properties exercise random placements, crops, overlays, moves, removals,
-and invalidation for every pixel protocol. See [agent notes](agent-notes.md) for
-reproducibility and compatibility pitfalls.
+and invalidation for every pixel protocol.
 
 Protocol references: kitty's **Terminal graphics protocol**, iTerm2's **Inline
 Images Protocol**, WezTerm's **iTerm Image Protocol**, and XTerm's **Control

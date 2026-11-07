@@ -11,11 +11,12 @@ Each layer depends only on the layers below it.
 | Package | Owns | Status |
 |---|---|---|
 | `app` | Event loop, redraw scheduling, `Post`, `After` and `Every` for background work, OSC 52 copy | done |
-| `widget` | Text, flex, box, panel, button, input, textarea, scroll, list, table, split, tabs, sparkline, modal | done |
+| `widget` | Text, flex, box, panel, button variants, input, textarea, scroll, list, table, split, tabs, sparkline, modal, dialog, notifications, image | done |
 | `view` | Element tree reconciled by key, focus and traps, hit testing, pointer capture, hover, selection, layers | done |
 | `layout` | Constraints down, sizes up; sizing rules and space distribution | done |
-| `cell` | Cells, styles, color downgrade, the `Buffer`, and the diffing `Renderer` | done |
-| `probe` | Capability queries at startup, ended by a DA1 sentinel | done |
+| `clipboard` | Images from the system clipboard, pasted image paths, format sniffing | done |
+| `cell` | Cells, styles, color downgrade, the `Buffer`, image placements, and the diffing `Renderer` | done |
+| `probe` | Capability queries at startup, image protocols and cell pixel size, ended by a DA1 sentinel | done |
 | `uni` | Grapheme clusters and column widths from generated Unicode 17 tables | done |
 | `input` | Bytes to `Key`, `Mouse`, `Paste`, `Focus` and query replies | done |
 | `term` | Raw mode, private modes, mouse tracking, size, resize, cancellable reads, restore | done |
@@ -110,6 +111,29 @@ still costs one terminal write, because the loop drains the queue before
 flushing. Ctrl+C quits and ctrl+z suspends unless a widget or `Unhandled`
 takes the key. A panic restores the terminal before it propagates.
 
+Dialogs, notifications and tabs sit on the same pieces. `Dialog` is a modal
+with a title, a body and buttons; its default button takes focus and the
+arrow keys move between buttons. `Notifications` holds toasts the program
+owns and dismisses with `App.After`; they stack top-right, never take focus,
+and pass clicks outside themselves through. `TabBar` closes tabs with a mark,
+a middle click or ctrl+w, scrolls when tabs overflow, and `Tabs` keeps each
+tab's content state apart.
+
+Pastes arrive as one event from bracketed paste. `Input` joins pasted lines
+with a space, `TextArea` keeps them, both drop control characters and honor
+`MaxLength`, and `OnPaste` sees a paste first. Terminals paste only text, so
+images come in two ways: a dropped file pastes its path, which
+`clipboard.ImagePath` recognizes, and `clipboard.ReadImage` asks the OS
+clipboard through `osascript`, `wl-paste`, `xclip` or PowerShell.
+
+Images are a layer of the renderer, beside the cells. `widget.Image` places a
+picture in a rectangle of cells; the canvas turns clipping into a source
+crop, so images scroll with their container. The renderer diffs placements
+after the cells and speaks the protocol the probe found: kitty graphics
+(sent once, then placed, moved and deleted by id), sixel, or iTerm2 inline
+images. Without any of them the widget draws half blocks in truecolor, which
+every terminal shows. See [images](docs/images.md) for the byte sequences.
+
 ## netmon
 
 `cmd/netmon` lists the machine's sockets and the processes holding them. It
@@ -131,7 +155,8 @@ PID or the process. Enter or a double click filters by the selected row's
 process. Escape leaves the filter, then clears it. `p` pauses, `r` refreshes,
 `?` lists the keys and `q` quits. The line above the details pane drags to
 resize it. Sockets that appeared in the latest refresh are green, and the
-selection stays on its socket when rows move.
+selection stays on its socket when rows move. Toasts report a failed
+refresh, the recovery after it, pause and resume, and copied text.
 
 ## Decisions
 
@@ -183,6 +208,21 @@ selection stays on its socket when rows move.
 - **Copy uses OSC 52.** It is the only clipboard path that works over ssh and
   needs no platform code. Terminals without it ignore the request.
 
+- **Images are a renderer layer, not cells.** Pixel protocols draw outside
+  the cell grid, so the buffer records placements beside its cells and
+  reserves the cells under them. The renderer diffs placements the way it
+  diffs cells, which lets an image scroll, clip and disappear without the
+  widget knowing the protocol. Half blocks are the fallback because they are
+  plain cells and work everywhere.
+- **A cursor move separates clusters.** Two lone regional indicators in
+  adjacent cells became one flag on a mode 2027 terminal. The renderer now
+  moves the cursor between two cells only when `uni.Joins` says the second
+  would extend the first, so other text keeps one move per run.
+- **Clipboard images come from OS tools.** No terminal pastes image bytes.
+  Running `osascript`, `wl-paste`, `xclip` or PowerShell adds no Go
+  dependency. The test that writes the real clipboard runs only with
+  `TUI_CLIPBOARD_TEST=1`, after an early version replaced a user's clipboard.
+
 ## Verification
 
 This module is not listed in the repository's local `go.work`, so run its
@@ -195,6 +235,8 @@ GOWORK=off go test -run '^$' -fuzz FuzzDecoder -fuzztime 60s ./input
 GOWORK=off go test -run '^$' -fuzz FuzzUnits -fuzztime 60s ./uni
 GOWORK=off go test -run '^$' -bench . ./cell ./uni
 GOWORK=off go run ./cmd/netmon -fake 5000   # by hand: a load test
+GOWORK=off go run ./cmd/tui-image photo.png # by hand: the protocol in the status line
+TUI_CLIPBOARD_TEST=1 GOWORK=off go test ./clipboard  # replaces your clipboard
 (cd uni && GOWORK=off go generate)  # downloads the UCD once into the user cache
 for t in windows/amd64 windows/arm64 linux/amd64 linux/arm64 freebsd/amd64 darwin/amd64; do
   GOOS=${t%/*} GOARCH=${t#*/} GOWORK=off go vet ./...
@@ -251,6 +293,16 @@ What the tests cover:
   50,000-row table. Removing the busy guard or the select-by-key lookup fails
   the tests. On macOS the binary also ran on a pty, against lsof and with
   `-fake 5000 -every 100ms`, and exited cleanly.
+- Dialogs, notifications, tabs and paste: rendered through a real tree with
+  key and mouse events, and checked with deliberate mutations (27 for
+  dialogs and notifications, 37 for paste, tabs and the clipboard), each
+  caught by a test.
+- Images: the probe against scripted terminals for each protocol, the kitty
+  reply split across reads, transmit-once and place, move and delete on
+  change, crops under a scroll, invalidation, half-block colors and aspect,
+  decoding every format, and a property test of random image frames against
+  the emulator's recorded placements. 37 mutations were each caught. The
+  demo ran on a pty in half-block and iTerm2 modes and exited cleanly.
 - `cmd/tui-demo`: the demo runs on a pty while tests send real mouse bytes and
   check the emulated screen: click and drag painting, right-click erase, wheel,
   resize, the Escape timeout, signals, and restore on exit. The emulator
@@ -258,7 +310,10 @@ What the tests cover:
   clusters laid out to the column, and the mode turned off on exit.
 
 Not yet verified: Windows has been compiled and vetted, not run, and so has
-netmon's netstat source. The console
+netmon's netstat source and the PowerShell clipboard path. Images have not
+been looked at in a real kitty, WezTerm, iTerm2 or sixel terminal; tests use
+the emulator. Images inside tmux or screen need passthrough, which is not
+implemented. The console
 input path, including the mouse record conversion, needs a real Windows
 Terminal and conhost session. The probe's terminal table and the
 cluster-width rules come from documentation, not from runs against each
