@@ -42,6 +42,9 @@ type Options struct {
 	Unhandled func(a *App, e input.Event) bool
 	// NoDefaultKeys turns off the ctrl+c and ctrl+z defaults.
 	NoDefaultKeys bool
+	// Start runs on the loop before the first frame, for example to start
+	// background work with Every.
+	Start func(a *App)
 }
 
 // App is a running program. Its methods other than Post and Quit must be
@@ -210,6 +213,10 @@ func (a *App) run(root func(*App) view.Element, signals <-chan os.Signal, opts O
 	defer close(stopReader)
 	go readInput(a.term, &decoder, events, readErr, stopReader)
 
+	if opts.Start != nil {
+		opts.Start(a)
+		a.runPosts()
+	}
 	a.build(root)
 	for _, e := range early {
 		a.dispatch(root, e, opts)

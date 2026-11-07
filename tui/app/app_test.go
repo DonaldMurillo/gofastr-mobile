@@ -201,16 +201,15 @@ func TestEveryTicksOnTheLoop(t *testing.T) {
 	ticks := 0
 	var stop func()
 	s := start(t, 20, 2, func(a *App) view.Element {
-		if stop == nil {
-			stop = a.Every(10*time.Millisecond, func() {
-				ticks++
-				if ticks == 3 {
-					a.Quit()
-				}
-			})
-		}
 		return widget.Label(fmt.Sprintf("ticks %d", ticks))
-	}, Options{})
+	}, Options{Start: func(a *App) {
+		stop = a.Every(10*time.Millisecond, func() {
+			ticks++
+			if ticks == 3 {
+				a.Quit()
+			}
+		})
+	}})
 	s.exit()
 	stop()
 	if ticks != 3 {
