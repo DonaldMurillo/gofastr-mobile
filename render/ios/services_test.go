@@ -249,7 +249,7 @@ enum ServiceChecks {
         rejected { try MobileShareRequest(title: nil, text: nil, files: [half, half]).validate() }
         rejected { try MobileShareRequest(title: nil, text: nil, files: []).validate() }
         let maximumFile = MobileFileExport(name: "maximum.bin", mediaType: "application/octet-stream", data: Data(repeating: 255, count: 1_048_576).base64EncodedString())
-        let maximumShare = MobileServiceRequest(id: "maximum", notification: nil, share: MobileShareRequest(title: "Share", text: String(repeating: "\u{1}", count: 65_536), files: [maximumFile]), clipboard: nil, audio: nil, commit: nil)
+        let maximumShare = MobileServiceRequest(id: "maximum", notification: nil, share: MobileShareRequest(title: "Share", text: String(repeating: "\u{1}", count: 65_536), files: [maximumFile]), clipboard: nil, audio: nil, incomingShare: nil, secureStorage: nil, widget: nil, commit: nil)
         try maximumShare.validate()
         let maximumJSON = try JSONEncoder().encode(maximumShare)
         precondition(maximumJSON.count <= MobileServiceBounds.maximumJSON, "the bounded JSON envelope must allow escaped slashes and legal 64 KiB text plus a full 1 MiB file")
