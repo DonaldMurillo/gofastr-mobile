@@ -49,11 +49,11 @@ same scaffold, rendered inside this repository.
 See [developer workflow and validation](docs/developer-workflow.md) for a
 command overview, completed checks, and the remaining platform acceptance gates.
 
-## The gofastr pin
+## The gofastr version
 
-No gofastr release carries the seams this module uses yet, so `go.mod` pins
-the gofastr main commit that merged them (#663, `6905b8f07`) as a
-pseudo-version. The seams:
+`go.mod` requires gofastr v0.96.0, the first release with the seams this
+module uses. Before it, `go.mod` pinned the main commit that merged them
+(#663, `6905b8f07`) as a pseudo-version. The seams:
 
 | Seam | What it does here |
 |---|---|
