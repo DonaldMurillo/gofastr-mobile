@@ -6,6 +6,7 @@
 // Widgets are plain structs. Wrap one in view.E to make an element, or
 // use the helper constructors such as Row, Column and Label. See
 // widget/docs/dialogs-notifications.md for dialog and notification usage.
+// See widget/docs/paste-tabs-clipboard.md for paste and tab behavior.
 package widget
 
 import "github.com/DonaldMurillo/gofastr-native/tui/cell"

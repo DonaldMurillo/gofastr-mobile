@@ -17,6 +17,10 @@ type TextArea struct {
 	Value       string
 	Placeholder string
 	OnChange    func(string)
+	// MaxLength limits the value in runes; zero means unlimited.
+	MaxLength int
+	// OnPaste receives raw text first; true consumes the paste.
+	OnPaste     func(text string) bool
 	AutoFocused bool
 	Style       cell.Style
 	FocusStyle  cell.Style
@@ -128,6 +132,9 @@ func (t TextArea) Cursor(n *view.Node) (layout.Point, bool) {
 }
 
 func (t TextArea) Handle(n *view.Node, e view.Event) bool {
+	if paste, ok := e.(view.PasteEvent); ok && t.OnPaste != nil && t.OnPaste(paste.Text) {
+		return true
+	}
 	st := n.State().(*textAreaState)
 	value := t.Value
 	lines := splitLines(n.Tree().Method, value)
@@ -144,6 +151,7 @@ func (t TextArea) Handle(n *view.Node, e view.Event) bool {
 	}
 	insert := func(text string) {
 		if t.OnChange != nil {
+			text = limitInsert(text, value, t.MaxLength)
 			edit(value[:cur]+text+value[cur:], cur+len(text))
 		}
 	}
@@ -173,7 +181,10 @@ func (t TextArea) Handle(n *view.Node, e view.Event) bool {
 
 	switch e := e.(type) {
 	case view.PasteEvent:
-		insert(strings.ReplaceAll(strings.ReplaceAll(e.Text, "\r\n", "\n"), "\r", "\n"))
+		if t.OnChange == nil {
+			return false
+		}
+		insert(pasteText(e.Text, true))
 		return true
 	case *view.PointerEvent:
 		switch {

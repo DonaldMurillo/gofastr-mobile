@@ -1,8 +1,6 @@
 package widget
 
 import (
-	"strings"
-
 	"github.com/DonaldMurillo/gofastr-native/tui/cell"
 	"github.com/DonaldMurillo/gofastr-native/tui/input"
 	"github.com/DonaldMurillo/gofastr-native/tui/layout"
@@ -22,6 +20,10 @@ type Input struct {
 	Placeholder string
 	OnChange    func(string)
 	OnSubmit    func(string)
+	// MaxLength limits the value in runes; zero means unlimited.
+	MaxLength int
+	// OnPaste receives raw text first; true consumes the paste.
+	OnPaste     func(text string) bool
 	AutoFocused bool
 	// Mask replaces each character on screen, for passwords.
 	Mask rune
@@ -31,11 +33,19 @@ type Input struct {
 
 type inputState struct {
 	cursor int // byte offset into the value
+	anchor int
 	scroll int // first visible column
 	col    int // cursor column on screen, after the last draw
 }
 
-func (Input) NewState() any { return &inputState{} }
+func (Input) NewState() any { return &inputState{anchor: -1} }
+
+func (st *inputState) selection() (int, int) {
+	if st.anchor < 0 {
+		return st.cursor, st.cursor
+	}
+	return min(st.anchor, st.cursor), max(st.anchor, st.cursor)
+}
 
 func (in Input) Focusable() bool { return true }
 func (in Input) AutoFocus() bool { return in.AutoFocused }
@@ -112,10 +122,15 @@ func (in Input) Draw(n *view.Node, c *view.Canvas) {
 	}
 	st.scroll = max(st.scroll, 0)
 	x := -st.scroll
+	start, end := st.selection()
 	for _, u := range us {
 		text, w := in.look(in.Value, u)
 		if w > 0 && x >= 0 && x+w <= size.W {
-			c.Set(x, 0, text, w, style)
+			unitStyle := style
+			if u.start >= start && u.start < end {
+				unitStyle.Attrs ^= cell.Reverse
+			}
+			c.Set(x, 0, text, w, unitStyle)
 		}
 		x += w
 	}
@@ -165,11 +180,17 @@ func wordForward(s string, us []unit, offset int) int {
 }
 
 func (in Input) Handle(n *view.Node, e view.Event) bool {
+	if paste, ok := e.(view.PasteEvent); ok && in.OnPaste != nil && in.OnPaste(paste.Text) {
+		return true
+	}
 	st := n.State().(*inputState)
 	m := n.Tree().Method
 	value := in.Value
 	us := units(m, value)
 	st.cursor = snap(us, min(st.cursor, len(value)))
+	if st.anchor >= 0 {
+		st.anchor = snap(us, min(st.anchor, len(value)))
+	}
 	cur := st.cursor
 
 	prev := func() int {
@@ -189,7 +210,7 @@ func (in Input) Handle(n *view.Node, e view.Event) bool {
 		return len(value)
 	}
 	edit := func(v string, at int) {
-		st.cursor = at
+		st.cursor, st.anchor = at, -1
 		if in.OnChange != nil && v != value {
 			in.OnChange(v)
 		}
@@ -198,12 +219,17 @@ func (in Input) Handle(n *view.Node, e view.Event) bool {
 		if in.OnChange == nil {
 			return
 		}
-		edit(value[:cur]+text+value[cur:], cur+len(text))
+		start, end := st.selection()
+		text = limitInsert(text, value[:start]+value[end:], in.MaxLength)
+		edit(value[:start]+text+value[end:], start+len(text))
 	}
 
 	switch e := e.(type) {
 	case view.PasteEvent:
-		insert(strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(e.Text))
+		if in.OnChange == nil {
+			return false
+		}
+		insert(pasteText(e.Text, false))
 		return true
 	case *view.PointerEvent:
 		if e.Kind != view.Press && e.Kind != view.Drag || e.Button != input.ButtonLeft {
@@ -220,10 +246,26 @@ func (in Input) Handle(n *view.Node, e view.Event) bool {
 			}
 			col += w
 		}
+		if e.Kind == view.Press && e.Mods&input.ModShift == 0 {
+			st.anchor = st.cursor
+		} else if st.anchor < 0 {
+			st.anchor = cur
+		}
 		return true
 	case view.KeyEvent:
 		k := e.Key
 		ctrl, alt := k.Mods&input.ModCtrl != 0, k.Mods&input.ModAlt != 0
+		moving := k.Code == input.KeyLeft || k.Code == input.KeyRight || k.Code == input.KeyHome || k.Code == input.KeyEnd || k.Code == input.KeyRune && (ctrl && (k.Rune == 'a' || k.Rune == 'b' || k.Rune == 'e' || k.Rune == 'f') || alt && (k.Rune == 'b' || k.Rune == 'f'))
+		if moving {
+			if k.Mods&input.ModShift != 0 {
+				if st.anchor < 0 {
+					st.anchor = cur
+				}
+			} else {
+				st.anchor = -1
+			}
+		}
+		start, end := st.selection()
 		switch {
 		case k.Code == input.KeyLeft && (ctrl || alt), k.Code == input.KeyRune && alt && k.Rune == 'b':
 			st.cursor = wordBack(value, us, cur)
@@ -237,6 +279,8 @@ func (in Input) Handle(n *view.Node, e view.Event) bool {
 			st.cursor = 0
 		case k.Code == input.KeyEnd, k.Code == input.KeyRune && ctrl && k.Rune == 'e':
 			st.cursor = len(value)
+		case start != end && (k.Code == input.KeyBackspace || k.Code == input.KeyDelete || k.Code == input.KeyRune && ctrl && k.Rune == 'd'):
+			edit(value[:start]+value[end:], start)
 		case k.Code == input.KeyBackspace && (ctrl || alt), k.Code == input.KeyRune && ctrl && k.Rune == 'w':
 			at := wordBack(value, us, cur)
 			edit(value[:at]+value[cur:], at)
