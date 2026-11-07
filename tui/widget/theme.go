@@ -1,29 +1,33 @@
 // Package widget has the standard widgets built on package view: text,
-// flex rows and columns, boxes, stacks and modals, buttons, text input,
-// scroll views, virtualized lists and tables, split panes, tabs and
-// sparklines.
+// flex rows and columns, boxes, stacks, modals, dialogs, notifications,
+// buttons, text input, scroll views, virtualized lists and tables, split
+// panes, tabs and sparklines.
 //
 // Widgets are plain structs. Wrap one in view.E to make an element, or
-// use the helper constructors such as Row, Column and Label.
+// use the helper constructors such as Row, Column and Label. See
+// widget/docs/dialogs-notifications.md for dialog and notification usage.
 package widget
 
 import "github.com/DonaldMurillo/gofastr-native/tui/cell"
 
 // Styles is the set of styles widgets fall back to.
 type Styles struct {
-	Text, Muted, Accent       cell.Style
-	Border, BorderFocus       cell.Style
-	Title                     cell.Style
-	Selected, SelectedBlurred cell.Style
-	Header                    cell.Style
-	Button, ButtonHover       cell.Style
-	ButtonFocus, ButtonPress  cell.Style
-	Input, InputFocus         cell.Style
-	Placeholder               cell.Style
-	ScrollTrack, ScrollThumb  cell.Style
-	Divider, DividerActive    cell.Style
-	Backdrop                  cell.Style
-	TabActive, Tab            cell.Style
+	Text, Muted, Accent         cell.Style
+	Border, BorderFocus         cell.Style
+	Title                       cell.Style
+	Selected, SelectedBlurred   cell.Style
+	Header                      cell.Style
+	Button, ButtonHover         cell.Style
+	ButtonFocus, ButtonPress    cell.Style
+	ButtonPrimary, ButtonDanger cell.Style
+	NoticeInfo, NoticeSuccess   cell.Style
+	NoticeWarning, NoticeError  cell.Style
+	Input, InputFocus           cell.Style
+	Placeholder                 cell.Style
+	ScrollTrack, ScrollThumb    cell.Style
+	Divider, DividerActive      cell.Style
+	Backdrop                    cell.Style
+	TabActive, Tab              cell.Style
 }
 
 // DefaultTheme uses the 16 ANSI colors, so it follows the user's terminal
@@ -40,6 +44,12 @@ var DefaultTheme = Styles{
 	SelectedBlurred: cell.Style{Attrs: cell.Reverse},
 	Header:          cell.Style{Attrs: cell.Bold},
 	Button:          cell.Style{Attrs: cell.Reverse},
+	ButtonPrimary:   cell.Style{Fg: cell.Black, Bg: cell.Cyan, Attrs: cell.Bold},
+	ButtonDanger:    cell.Style{Fg: cell.White, Bg: cell.Red, Attrs: cell.Bold},
+	NoticeInfo:      cell.Style{Fg: cell.Cyan},
+	NoticeSuccess:   cell.Style{Fg: cell.Green},
+	NoticeWarning:   cell.Style{Fg: cell.Yellow},
+	NoticeError:     cell.Style{Fg: cell.Red},
 	ButtonHover:     cell.Style{Fg: cell.Black, Bg: cell.BrightCyan},
 	ButtonFocus:     cell.Style{Fg: cell.Black, Bg: cell.Cyan, Attrs: cell.Bold},
 	ButtonPress:     cell.Style{Fg: cell.Black, Bg: cell.BrightWhite, Attrs: cell.Bold},

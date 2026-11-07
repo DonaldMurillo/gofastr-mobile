@@ -109,6 +109,14 @@ func (b Box) Draw(n *view.Node, c *view.Canvas) {
 	}
 }
 
+// surfaceBox clears its rectangle even when the theme uses default colors.
+type surfaceBox struct{ Box }
+
+func (b surfaceBox) Draw(n *view.Node, c *view.Canvas) {
+	c.Fill(layout.Rect{W: c.Size().W, H: c.Size().H}, b.Style)
+	b.Box.Draw(n, c)
+}
+
 // Stack draws its children on top of each other, later ones above. Each
 // child gets the stack's full size as a loose constraint and sits at the
 // top-left, unless it is wrapped in At or Center.
@@ -137,6 +145,7 @@ type position struct {
 	alignX   layout.Align
 	alignY   layout.Align
 	explicit bool
+	margin   int
 }
 
 func (p position) place(space, child layout.Size) layout.Point {
@@ -144,7 +153,7 @@ func (p position) place(space, child layout.Size) layout.Point {
 		return layout.Point{X: layout.Center.Offset(space.W, child.W), Y: layout.Center.Offset(space.H, child.H)}
 	}
 	if p.explicit {
-		return layout.Point{X: p.alignX.Offset(space.W, child.W), Y: p.alignY.Offset(space.H, child.H)}
+		return layout.Point{X: p.margin + p.alignX.Offset(max(space.W-2*p.margin, 0), child.W), Y: p.margin + p.alignY.Offset(max(space.H-2*p.margin, 0), child.H)}
 	}
 	return p.at
 }
@@ -157,6 +166,9 @@ func (p position) Layout(n *view.Node, c layout.Constraints) layout.Size {
 		return n.LayoutChild(0, layout.Tight(c.Max()))
 	}
 	inner := c
+	if p.margin > 0 {
+		inner = c.Deflate(layout.Uniform(p.margin))
+	}
 	if !p.center && !p.explicit {
 		inner = layout.Loose(layout.Size{W: max(c.MaxW-p.at.X, 0), H: max(c.MaxH-p.at.Y, 0)})
 	}

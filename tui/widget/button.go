@@ -7,12 +7,23 @@ import (
 	"github.com/DonaldMurillo/gofastr-native/tui/view"
 )
 
+// ButtonVariant selects a button's base style.
+type ButtonVariant int
+
+const (
+	ButtonDefault ButtonVariant = iota
+	ButtonPrimary
+	ButtonDanger
+)
+
 // Button runs OnClick when clicked, or on Enter or Space while focused. A
 // click counts only if the pointer is released over the button.
 type Button struct {
-	Label    string
-	OnClick  func()
-	Disabled bool
+	Label       string
+	OnClick     func()
+	Disabled    bool
+	Variant     ButtonVariant
+	AutoFocused bool
 	// Styles override the theme when non-zero.
 	Style, HoverStyle, FocusStyle, PressStyle cell.Style
 }
@@ -39,7 +50,14 @@ func pick(override, fallback cell.Style) cell.Style {
 
 func (b Button) Draw(n *view.Node, c *view.Canvas) {
 	st := n.State().(*buttonState)
-	style := pick(b.Style, Theme.Button)
+	base := Theme.Button
+	switch b.Variant {
+	case ButtonPrimary:
+		base = Theme.ButtonPrimary
+	case ButtonDanger:
+		base = Theme.ButtonDanger
+	}
+	style := pick(b.Style, base)
 	switch {
 	case b.Disabled:
 		style = Theme.Muted
@@ -58,6 +76,7 @@ func (b Button) Draw(n *view.Node, c *view.Canvas) {
 
 func (b Button) Focusable() bool { return !b.Disabled }
 func (b Button) Hoverable() bool { return !b.Disabled }
+func (b Button) AutoFocus() bool { return b.AutoFocused }
 
 func (b Button) Handle(n *view.Node, e view.Event) bool {
 	if b.Disabled {

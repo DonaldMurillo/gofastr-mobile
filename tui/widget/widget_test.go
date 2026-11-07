@@ -542,3 +542,365 @@ func TestNestedFlexTakesItsContentSize(t *testing.T) {
 	})
 	h.want("top", " Add", "type")
 }
+
+func TestButtonVariants(t *testing.T) {
+	h := newHarness(t, 24, 1, func() view.Element {
+		return Row(view.E(Button{Label: "D"}), view.E(Button{Label: "P", Variant: ButtonPrimary}),
+			view.E(Button{Label: "X", Variant: ButtonDanger}), view.E(Button{Label: "Off", Variant: ButtonDanger, Disabled: true}),
+			view.E(Button{Label: "Own", Variant: ButtonPrimary, Style: Theme.Accent}))
+	})
+	h.want(" D  P  X  Off  Own")
+	for _, check := range []struct {
+		x     int
+		style cell.Style
+	}{{0, Theme.Button}, {3, Theme.ButtonPrimary}, {6, Theme.ButtonDanger}, {9, Theme.Muted}, {14, Theme.Accent}} {
+		if got := h.buf.At(check.x, 0).Style; got != check.style {
+			t.Fatalf("style at %d: %+v, want %+v", check.x, got, check.style)
+		}
+	}
+	h.send(input.Mouse{X: 6, Y: 0, Action: input.MouseMove})
+	if got := h.buf.At(6, 0).Style; got != Theme.ButtonHover {
+		t.Fatalf("variant hover: %+v", got)
+	}
+	h.send(press(6, 0))
+	if got := h.buf.At(6, 0).Style; got != Theme.ButtonPress {
+		t.Fatalf("variant press: %+v", got)
+	}
+	h.send(release(6, 0), input.Mouse{X: 23, Y: 0, Action: input.MouseMove})
+	if got := h.buf.At(6, 0).Style; got != Theme.ButtonFocus {
+		t.Fatalf("variant focus: %+v", got)
+	}
+}
+
+func TestButtonAutoFocused(t *testing.T) {
+	clicked := false
+	h := newHarness(t, 15, 1, func() view.Element {
+		return Row(NewButton("First", nil), view.E(Button{Label: "Auto", AutoFocused: true, OnClick: func() { clicked = true }}))
+	})
+	h.want(" First  Auto")
+	if got := h.tree.Focused(); got == nil || got.Widget().(Button).Label != "Auto" {
+		t.Fatal("AutoFocused button did not take focus")
+	}
+	h.send(key(input.KeyEnter))
+	if !clicked {
+		t.Fatal("autofocused button did not activate")
+	}
+}
+
+func TestDialogRendersAndNavigates(t *testing.T) {
+	open := false
+	clicked, underneath := "", 0
+	h := newHarness(t, 40, 9, func() view.Element {
+		return OnKey(func(k input.Key) bool {
+			if k.Code == input.KeyTab {
+				return false
+			}
+			underneath++
+			return true
+		}, Layers(
+			NewButton("Under", func() { clicked = "under" }),
+			view.If(open, (Dialog{Title: "Update", Text: "Proceed with update?", Width: 30,
+				OnClose: func() { open = false }, Buttons: []DialogButton{
+					{Label: "Cancel", OnClick: func() { clicked = "cancel" }},
+					{Label: "Save", Variant: ButtonPrimary, Default: true, OnClick: func() { clicked = "save" }},
+				}}).Element()),
+		))
+	})
+	h.send(key(input.KeyTab))
+	previous := h.tree.Focused()
+	open = true
+	h.frame()
+	h.want(" Under", "", "        ╭ Update ──────────────╮", "        │ Proceed with update? │",
+		"        │                      │", "        │       Cancel   Save  │", "        ╰──────────────────────╯")
+	focused := func(want string) {
+		t.Helper()
+		if got := h.tree.Focused(); got == nil || got.Widget().(Button).Label != want {
+			t.Fatalf("focus is not on %s", want)
+		}
+	}
+	focused("Save")
+	h.send(key(input.KeyEnter))
+	if clicked != "save" {
+		t.Fatalf("default action: %q", clicked)
+	}
+	h.send(key(input.KeyRight))
+	focused("Cancel")
+	h.send(key(input.KeyEnter))
+	if clicked != "cancel" {
+		t.Fatalf("right action: %q", clicked)
+	}
+	h.send(key(input.KeyLeft))
+	focused("Save")
+	h.send(key(input.KeyTab))
+	focused("Cancel")
+	h.send(ch('q'), key(input.KeyF1))
+	if underneath != 0 {
+		t.Fatalf("keys escaped the dialog: %d", underneath)
+	}
+	h.send(key(input.KeyEscape))
+	if open || h.tree.Focused() != previous {
+		t.Fatal("escape did not close and restore focus")
+	}
+	h.send(key(input.KeyEnter))
+	if clicked != "under" {
+		t.Fatalf("restored action: %q", clicked)
+	}
+	open = true
+	h.frame()
+	h.send(click(0, 8)...)
+	if open || h.tree.Focused() != previous {
+		t.Fatal("backdrop did not close and restore focus")
+	}
+}
+
+func TestDialogBodyWidthAndFirstAction(t *testing.T) {
+	h := newHarness(t, 70, 9, func() view.Element {
+		return Layers((Dialog{Title: "Body", Text: "ignored", Body: Paragraph(strings.Repeat("x", 80)),
+			BorderStyle: Theme.NoticeError, Buttons: []DialogButton{{Label: "First"}, {Label: "Second"}}}).Element())
+	})
+	if got := h.tree.Focused(); got == nil || got.Widget().(Button).Label != "First" {
+		t.Fatal("first action did not take focus")
+	}
+	lines := h.lines()
+	if lines[2] != "     │ "+strings.Repeat("x", 56)+" │" || lines[3] != "     │ "+strings.Repeat("x", 24)+strings.Repeat(" ", 32)+" │" {
+		t.Fatalf("body or default width:\n%s", strings.Join(lines, "\n"))
+	}
+	if got := h.buf.At(5, 1).Style; got != Theme.NoticeError {
+		t.Fatalf("border style: %+v", got)
+	}
+	h.root = func() view.Element {
+		return Layers((Dialog{Body: view.E(Input{AutoFocused: true}), Buttons: []DialogButton{{Label: "Action"}}}).Element())
+	}
+	// Reopen to check that an autofocus request in Body cannot beat actions.
+	h.tree = view.NewTree(uni.Graphemes)
+	h.frame()
+	if got := h.tree.Focused(); got == nil {
+		t.Fatal("body dialog has no focus")
+	} else if b, ok := got.Widget().(Button); !ok || b.Label != "Action" {
+		t.Fatal("body autofocus overrode the first action")
+	}
+	// A body without actions is still a modal and can close.
+	closed := false
+	h.root = func() view.Element {
+		return Layers((Dialog{Text: "Only body", OnClose: func() { closed = true }}).Element())
+	}
+	h.frame()
+	h.send(key(input.KeyEscape))
+	if !closed {
+		t.Fatal("dialog without actions did not close")
+	}
+}
+
+func TestConfirmCallbacks(t *testing.T) {
+	confirmed, cancelled := 0, 0
+	h := newHarness(t, 32, 7, func() view.Element {
+		return Layers(Confirm("Confirm", "Apply changes?", "Apply", func() { confirmed++ }, func() { cancelled++ }).Element())
+	})
+	if !strings.Contains(strings.Join(h.lines(), "\n"), "Cancel   Apply") {
+		t.Fatalf("confirm actions: %v", h.lines())
+	}
+	h.send(key(input.KeyEnter), key(input.KeyLeft), key(input.KeyEnter), key(input.KeyEscape))
+	if confirmed != 1 || cancelled != 2 {
+		t.Fatalf("confirm %d cancel %d", confirmed, cancelled)
+	}
+	button := h.tree.Find(func(n *view.Node) bool {
+		b, ok := n.Widget().(Button)
+		return ok && b.Label == "Apply"
+	})
+	if button == nil || button.Widget().(Button).Variant != ButtonPrimary {
+		t.Fatal("confirm action is not primary")
+	}
+}
+
+func TestDialogArrowDirection(t *testing.T) {
+	h := newHarness(t, 28, 7, func() view.Element {
+		return Layers((Dialog{Text: "Choose", Buttons: []DialogButton{{Label: "A"}, {Label: "B", Default: true}, {Label: "C"}}}).Element())
+	})
+	if !strings.Contains(strings.Join(h.lines(), "\n"), " A   B   C ") {
+		t.Fatalf("action row: %v", h.lines())
+	}
+	for _, step := range []struct {
+		key  input.KeyCode
+		want string
+	}{{input.KeyRight, "C"}, {input.KeyLeft, "B"}, {input.KeyLeft, "A"}, {input.KeyLeft, "C"}, {input.KeyRight, "A"}} {
+		h.send(key(step.key))
+		if got := h.tree.Focused(); got == nil || got.Widget().(Button).Label != step.want {
+			t.Fatalf("after %v focus is not %s", step.key, step.want)
+		}
+	}
+}
+
+func TestNotificationsStackTopRight(t *testing.T) {
+	var notices Notifications
+	notices.Push(NoticeInfo, "One", "first")
+	notices.Push(NoticeSuccess, "Two", "second")
+	notices.Push(NoticeWarning, "Three", "third")
+	h := newHarness(t, 46, 12, func() view.Element { return Layers(Label("under"), notices.Element()) })
+	h.want("under",
+		"     ╭ i One ───────────────────────────────╮", "     │ first                                │", "     ╰──────────────────────────────────────╯",
+		"     ╭ ✓ Two ───────────────────────────────╮", "     │ second                               │", "     ╰──────────────────────────────────────╯",
+		"     ╭ ! Three ─────────────────────────────╮", "     │ third                                │", "     ╰──────────────────────────────────────╯")
+	if h.tree.Focused() != nil {
+		t.Fatal("notifications took focus")
+	}
+}
+
+func TestNotificationsMaxAndItems(t *testing.T) {
+	notices := Notifications{Max: 2}
+	first := notices.Push(NoticeInfo, "One", "first")
+	second := notices.Push(NoticeInfo, "Two", "second")
+	third := notices.Push(NoticeInfo, "Three", "third")
+	if notices.Len() != 2 || !slices.Equal(notices.Items(), []Notice{{second, NoticeInfo, "Two", "second"}, {third, NoticeInfo, "Three", "third"}}) {
+		t.Fatalf("bounded items: %v", notices.Items())
+	}
+	copy := notices.Items()
+	copy[0].Title = "changed"
+	if notices.Items()[0].Title != "Two" {
+		t.Fatal("Items exposed internal storage")
+	}
+	h := newHarness(t, 44, 9, func() view.Element { return Layers(notices.Element()) })
+	if screen := strings.Join(h.lines(), "\n"); strings.Contains(screen, "One") || !strings.Contains(screen, "Two") || !strings.Contains(screen, "Three") {
+		t.Fatalf("bounded screen: %s", screen)
+	}
+	notices.Dismiss(first)
+	notices.Dismiss(second)
+	if notices.Len() != 1 || notices.Items()[0].ID != third {
+		t.Fatalf("dismiss: %v", notices.Items())
+	}
+	notices.Clear()
+	h.frame()
+	h.want()
+	if notices.Len() != 0 || notices.Push(NoticeError, "Next", "") <= third {
+		t.Fatal("Clear did not empty notices and preserve ID sequence")
+	}
+	var defaults Notifications
+	for range 6 {
+		defaults.Push(NoticeInfo, "", "")
+	}
+	if defaults.Len() != 5 || defaults.Items()[0].ID != 2 {
+		t.Fatalf("default Max: %v", defaults.Items())
+	}
+}
+
+func TestNotificationsDismissAndKeepFocus(t *testing.T) {
+	var notices Notifications
+	first := notices.Push(NoticeInfo, "One", "first")
+	second := notices.Push(NoticeInfo, "Two", "second")
+	third := notices.Push(NoticeInfo, "Three", "third")
+	f := &field{}
+	h := newHarness(t, 50, 12, func() view.Element { return Layers(f.element(), notices.Element()) })
+	focused := h.tree.Focused()
+	h.send(ch('a'))
+	h.send(input.Mouse{X: 10, Y: 5, Action: input.MouseMove})
+	retained := h.tree.Find(func(n *view.Node) bool { return n.Key() == fmt.Sprint(second) })
+	if retained == nil || !retained.Hovered() {
+		t.Fatal("second toast not hovered")
+	}
+	notices.Dismiss(first)
+	h.frame()
+	if got := h.tree.Find(func(n *view.Node) bool { return n.Key() == fmt.Sprint(second) }); got != retained || !got.Hovered() || got.Rect().Y != 1 {
+		t.Fatal("toast lost its keyed node or hover state")
+	}
+	h.send(click(10, 2)...)
+	if notices.Len() != 1 || notices.Items()[0].ID != third {
+		t.Fatalf("click dismissed wrong notices: %v", notices.Items())
+	}
+	h.send(ch('b'))
+	if f.value != "ab" || h.tree.Focused() != focused || !h.cur.Visible {
+		t.Fatalf("toast stole focus or keys: %q", f.value)
+	}
+	if got := h.lines()[0]; got != "ab" {
+		t.Fatalf("input screen: %q", got)
+	}
+}
+
+func TestNotificationsClicksPassThroughOutside(t *testing.T) {
+	var notices Notifications
+	notices.Push(NoticeInfo, "Toast", "message")
+	clicks := 0
+	h := newHarness(t, 50, 8, func() view.Element {
+		return Layers(Fill(OnClick(func(*view.PointerEvent) { clicks++ }, Label("under"))), notices.Element())
+	})
+	for _, p := range []layout.Point{{X: 0, Y: 2}, {X: 10, Y: 0}, {X: 49, Y: 2}, {X: 10, Y: 4}} {
+		h.send(click(p.X, p.Y)...)
+	}
+	if clicks != 4 || notices.Len() != 1 {
+		t.Fatalf("outside clicks: under %d notices %d", clicks, notices.Len())
+	}
+	h.send(click(10, 2)...)
+	if clicks != 4 || notices.Len() != 0 {
+		t.Fatalf("toast click: under %d notices %d", clicks, notices.Len())
+	}
+	h.want("under")
+}
+
+func TestNotificationsWrapAt40(t *testing.T) {
+	var notices Notifications
+	notices.Push(NoticeError, "Wide", strings.Repeat("x", 50))
+	h := newHarness(t, 50, 8, func() view.Element { return Layers(notices.Element()) })
+	h.want("", "         ╭ ✗ Wide ──────────────────────────────╮",
+		"         │ "+strings.Repeat("x", 36)+" │", "         │ "+strings.Repeat("x", 14)+strings.Repeat(" ", 22)+" │",
+		"         ╰──────────────────────────────────────╯")
+	// Small terminals keep the margin and wrap within the available width.
+	h.buf = cell.NewBuffer(14, 10)
+	h.frame()
+	if got := h.lines()[2]; got != " │ xxxxxxxx │" {
+		t.Fatalf("narrow toast: %q", got)
+	}
+}
+
+func TestNoticeLevelStylesAndGlyphs(t *testing.T) {
+	for _, tc := range []struct {
+		level NoticeLevel
+		style cell.Style
+	}{{NoticeInfo, Theme.NoticeInfo}, {NoticeSuccess, Theme.NoticeSuccess}, {NoticeWarning, Theme.NoticeWarning}, {NoticeError, Theme.NoticeError}} {
+		t.Run(fmt.Sprint(tc.level), func(t *testing.T) {
+			var notices Notifications
+			notices.Push(tc.level, "Title", "body")
+			h := newHarness(t, 44, 6, func() view.Element { return Layers(notices.Element()) })
+			glyph, _ := tc.level.appearance()
+			for _, method := range []uni.Method{uni.Codepoints, uni.Graphemes} {
+				if method.Width(glyph) != 1 {
+					t.Fatalf("glyph %q is not one column with %s", glyph, method)
+				}
+			}
+			if got := h.buf.At(3, 1).Style; got != tc.style {
+				t.Fatalf("notice border style: %+v", got)
+			}
+			if got := h.buf.At(5, 1).Style; got != merge(tc.style, Theme.Title) || h.buf.At(5, 1).Text != glyph {
+				t.Fatalf("notice title glyph or style: %+v", got)
+			}
+		})
+	}
+}
+
+func TestDialogAndNotificationsClearTheirSurfaces(t *testing.T) {
+	for _, kind := range []string{"dialog", "notification"} {
+		t.Run(kind, func(t *testing.T) {
+			var notices Notifications
+			notices.Push(NoticeInfo, "Toast", "body")
+			h := newHarness(t, 50, 10, func() view.Element {
+				overlay := notices.Element()
+				if kind == "dialog" {
+					overlay = (Dialog{Text: "body", Buttons: []DialogButton{{Label: "OK"}}}).Element()
+				}
+				return Layers(Fill(Paragraph(strings.Repeat("u", 500))), overlay)
+			})
+			box := h.tree.Find(func(n *view.Node) bool { _, ok := n.Widget().(surfaceBox); return ok })
+			if box == nil {
+				t.Fatal("overlay has no surface")
+			}
+			r := box.Rect()
+			want := strings.Repeat("u", r.X) + "│ body" + strings.Repeat(" ", r.W-7) + "│" + strings.Repeat("u", 50-r.X-r.W)
+			if got := h.lines()[r.Y+1]; got != want {
+				t.Fatalf("surface body row: %q, want %q", got, want)
+			}
+			if kind == "dialog" {
+				want = strings.Repeat("u", r.X) + "│" + strings.Repeat(" ", r.W-2) + "│" + strings.Repeat("u", 50-r.X-r.W)
+				if got := h.lines()[r.Y+2]; got != want {
+					t.Fatalf("dialog blank row: %q, want %q", got, want)
+				}
+			}
+		})
+	}
+}
