@@ -3,18 +3,20 @@
 // tests can check what a user would see rather than which bytes were sent.
 //
 // It models the subset of xterm behavior a full-screen program relies on:
-// cursor movement, SGR, erase, autowrap, wide characters, private modes and
-// OSC 8 links. Anything else is recorded in Errors instead of being guessed.
+// cursor movement, SGR, erase, autowrap, wide characters, grapheme clusters
+// (mode 2027), private modes and OSC 8 links. It answers DA1 and DECRQM
+// queries through Replies. Anything else is recorded in Errors instead of
+// being guessed.
 package vt
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/DonaldMurillo/gofastr-native/tui/cell"
+	"github.com/DonaldMurillo/gofastr-native/tui/uni"
 )
 
 // Screen is an emulated terminal screen.
@@ -32,6 +34,9 @@ type Screen struct {
 	Errors []string
 	// RuneWidth returns the display width of a rune: 0, 1 or 2.
 	RuneWidth func(rune) int
+	// Replies collects what the terminal sends back to queries. A test
+	// harness drains it into the program's input.
+	Replies []byte
 
 	cells       []cell.Cell
 	pen         cell.Style
@@ -57,7 +62,7 @@ const (
 // New returns a blank screen with autowrap on and the cursor visible, like a
 // freshly opened terminal.
 func New(width, height int) *Screen {
-	s := &Screen{Width: width, Height: height, CursorVisible: true, Autowrap: true, Modes: map[int]bool{}, RuneWidth: RuneWidth}
+	s := &Screen{Width: width, Height: height, CursorVisible: true, Autowrap: true, Modes: map[int]bool{}, RuneWidth: uni.RuneWidth}
 	s.cells = make([]cell.Cell, width*height)
 	for i := range s.cells {
 		s.cells[i] = cell.Blank
@@ -211,10 +216,21 @@ func (s *Screen) endString() {
 		s.pen.Link = uri
 		return
 	}
+	if body == "10;?" || body == "11;?" {
+		return // color queries: this terminal does not answer
+	}
 	s.errorf("unsupported OSC %q", body)
 }
 
 func (s *Screen) print(r rune) {
+	if s.Modes[2027] && s.afterLast() {
+		i := s.lastY*s.Width + s.lastX
+		joined := s.cells[i].Text + string(r)
+		if cluster, _ := uni.FirstGrapheme(joined); len(cluster) == len(joined) {
+			s.extend(joined)
+			return
+		}
+	}
 	width := s.RuneWidth(r)
 	if width == 0 {
 		if s.hasLast {
@@ -246,6 +262,44 @@ func (s *Screen) print(r rune) {
 	if s.X >= s.Width {
 		s.X = s.Width - 1
 		s.pendingWrap = s.Autowrap
+	}
+}
+
+// afterLast reports whether the cursor sits just after the last printed
+// cell, where a terminal would continue its grapheme cluster.
+func (s *Screen) afterLast() bool {
+	if !s.hasLast || s.Y != s.lastY {
+		return false
+	}
+	end := s.lastX + max(int(s.cells[s.lastY*s.Width+s.lastX].Width), 1)
+	return s.X == end || s.pendingWrap && end == s.Width
+}
+
+// extend adds to the last printed cell's grapheme cluster, widening it when
+// the cluster becomes wide, as terminals with mode 2027 do.
+func (s *Screen) extend(cluster string) {
+	row := s.cells[s.lastY*s.Width : (s.lastY+1)*s.Width]
+	last := &row[s.lastX]
+	_, width := uni.Graphemes.Next(cluster)
+	switch {
+	case width == int(last.Width) || width == 0:
+		last.Text = cluster
+	case width == 2 && last.Width == 1:
+		if s.lastX+1 >= s.Width {
+			s.errorf("cluster %q widened at the last column", cluster)
+			return
+		}
+		last.Text, last.Width = cluster, 2
+		row[s.lastX+1] = cell.Cell{Width: 0, Style: last.Style}
+		if s.Y == s.lastY && s.X == s.lastX+1 && !s.pendingWrap {
+			s.X++
+			if s.X >= s.Width {
+				s.X = s.Width - 1
+				s.pendingWrap = s.Autowrap
+			}
+		}
+	default:
+		s.errorf("cluster %q narrowed from %d to %d columns", cluster, last.Width, width)
 	}
 }
 
@@ -315,6 +369,22 @@ func (s *Screen) dispatchCSI(seq []byte) {
 	if body != "" && body[0] >= '<' && body[0] <= '?' {
 		marker, body = body[0], body[1:]
 	}
+	if marker == '?' && final == 'p' && strings.HasSuffix(body, "$") { // DECRQM
+		mode, err := strconv.Atoi(strings.TrimSuffix(body, "$"))
+		if err != nil {
+			s.errorf("bad DECRQM %q", seq)
+			return
+		}
+		setting := 0
+		if recognized[mode] {
+			setting = 2
+			if s.Modes[mode] {
+				setting = 1
+			}
+		}
+		s.Replies = fmt.Appendf(s.Replies, "\x1b[?%d;%d$y", mode, setting)
+		return
+	}
 	if strings.ContainsAny(body, " !\"#$%&'()*+,-./") {
 		s.errorf("unsupported CSI %q", seq)
 		return
@@ -345,6 +415,9 @@ func (s *Screen) dispatchCSI(seq []byte) {
 	}
 	if marker == '>' && final == 'u' || marker == '<' && final == 'u' {
 		return // kitty keyboard push/pop: no effect on the grid
+	}
+	if marker == '?' && final == 'u' || marker == '>' && final == 'q' {
+		return // kitty flags and XTVERSION queries: this terminal does not answer
 	}
 	if marker != 0 {
 		s.errorf("unsupported CSI %q", seq)
@@ -397,9 +470,19 @@ func (s *Screen) dispatchCSI(seq []byte) {
 		s.erase(s.Y, s.X, s.X+max(p.get(0, 1), 1))
 	case 'm':
 		s.sgr(p)
+	case 'c': // DA1: a VT220 with ANSI color
+		if p.get(0, 0) == 0 {
+			s.Replies = append(s.Replies, "\x1b[?62;22c"...)
+		}
 	default:
 		s.errorf("unsupported CSI %q", seq)
 	}
+}
+
+// recognized lists the private modes DECRQM reports as known.
+var recognized = map[int]bool{
+	7: true, 25: true, 1000: true, 1002: true, 1003: true, 1004: true,
+	1006: true, 1049: true, 2004: true, 2026: true, 2027: true,
 }
 
 func clamp(v, size int) int { return min(max(v, 0), max(size-1, 0)) }
@@ -535,19 +618,4 @@ func extendedColor(p params, i int) (cell.Color, int, bool) {
 		return cell.RGB(uint8(sub[1]), uint8(sub[2]), uint8(sub[3])), 0, true
 	}
 	return 0, 0, false
-}
-
-// RuneWidth is a minimal width function: 0 for combining marks and joiners,
-// 2 for common East Asian wide and emoji ranges, 1 otherwise.
-func RuneWidth(r rune) int {
-	switch {
-	case r == 0x200d || r >= 0xfe00 && r <= 0xfe0f || unicode.In(r, unicode.Mn, unicode.Me):
-		return 0
-	case r >= 0x1100 && r <= 0x115f, r >= 0x2e80 && r <= 0xa4cf, r >= 0xac00 && r <= 0xd7a3,
-		r >= 0xf900 && r <= 0xfaff, r >= 0xfe30 && r <= 0xfe4f, r >= 0xff00 && r <= 0xff60,
-		r >= 0xffe0 && r <= 0xffe6, r >= 0x1f300 && r <= 0x1f64f, r >= 0x1f900 && r <= 0x1f9ff,
-		r >= 0x20000 && r <= 0x3fffd:
-		return 2
-	}
-	return 1
 }
