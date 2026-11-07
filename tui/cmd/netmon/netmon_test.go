@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -42,12 +44,17 @@ func TestParseLsof(t *testing.T) {
 }
 
 func TestParseProcNet(t *testing.T) {
-	if binary.NativeEndian.Uint16([]byte{1, 0}) != 1 {
-		t.Skip("fixtures are in little-endian kernel format")
+	// /proc/net prints each address word as a host-order 32-bit integer.
+	address := func(ip string) string {
+		var out strings.Builder
+		for bytes := netip.MustParseAddr(ip).AsSlice(); len(bytes) > 0; bytes = bytes[4:] {
+			fmt.Fprintf(&out, "%08X", binary.NativeEndian.Uint32(bytes[:4]))
+		}
+		return out.String()
 	}
 	tcp := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n" +
-		"   0: 0100007F:0277 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0 100 0 0 10 0\n" +
-		"   1: 0200000A:C350 0470528C:01BB 01 00000000:00000000 02:000A7B2C 00000000  1000        0 67890 2 0 20 4 30 10 -1\n"
+		"   0: " + address("127.0.0.1") + ":0277 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0 100 0 0 10 0\n" +
+		"   1: " + address("10.0.0.2") + ":C350 " + address("140.82.112.4") + ":01BB 01 00000000:00000000 02:000A7B2C 00000000  1000        0 67890 2 0 20 4 30 10 -1\n"
 	got, err := parseProcNet(strings.NewReader(tcp), "tcp")
 	if err != nil {
 		t.Fatal(err)
@@ -61,8 +68,8 @@ func TestParseProcNet(t *testing.T) {
 	}
 
 	tcp6 := "  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n" +
-		"   0: 00000000000000000000000001000000:0016 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 111 1 0 100 0 0 10 0\n" +
-		"   1: 0000000000000000FFFF00000100007F:1F90 0000000000000000FFFF00000100007F:D431 01 00000000:00000000 00:00000000 00000000  1000        0 222 1 0 20 4 30 10 -1\n"
+		"   0: " + address("::1") + ":0016 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 111 1 0 100 0 0 10 0\n" +
+		"   1: " + address("::ffff:127.0.0.1") + ":1F90 " + address("::ffff:127.0.0.1") + ":D431 01 00000000:00000000 00:00000000 00000000  1000        0 222 1 0 20 4 30 10 -1\n"
 	got, err = parseProcNet(strings.NewReader(tcp6), "tcp6")
 	if err != nil {
 		t.Fatal(err)
