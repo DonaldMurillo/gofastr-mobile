@@ -157,11 +157,14 @@ func (s *Screen) feed(c byte) {
 		s.state, s.seq = escape, s.seq[:0]
 	case c == '\r':
 		s.X, s.pendingWrap = 0, false
+		s.hasLast = false
 	case c == '\n':
 		s.lineFeed()
 		s.pendingWrap = false
+		s.hasLast = false
 	case c == '\b':
 		s.X, s.pendingWrap = max(s.X-1, 0), false
+		s.hasLast = false
 	case c == 0x07:
 	case c < 0x20 || c == 0x7f:
 		s.errorf("control byte 0x%02x", c)
@@ -303,7 +306,7 @@ func (s *Screen) extend(cluster string) {
 			return
 		}
 		last.Text, last.Width = cluster, 2
-		row[s.lastX+1] = cell.Cell{Width: 0, Style: last.Style}
+		s.put(s.lastX+1, cell.Cell{Width: 0, Style: last.Style})
 		if s.Y == s.lastY && s.X == s.lastX+1 && !s.pendingWrap {
 			s.X++
 			if s.X >= s.Width {
@@ -437,6 +440,11 @@ func (s *Screen) dispatchCSI(seq []byte) {
 		return
 	}
 	s.pendingWrap = final == 'm' && s.pendingWrap || final == 'K' && s.pendingWrap || final == 'X' && s.pendingWrap
+	// Explicit positioning ends the preceding cluster even when the cursor
+	// stays at the same coordinates. SGR alone does not create that boundary.
+	if strings.ContainsRune("HfABCDGd", rune(final)) {
+		s.hasLast = false
+	}
 	switch final {
 	case 'H', 'f':
 		s.Y = clamp(p.get(0, 1)-1, s.Height)

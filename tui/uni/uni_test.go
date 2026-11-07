@@ -246,3 +246,25 @@ func hex(clusters []string) string {
 	}
 	return "[" + b.String() + "]"
 }
+
+func TestJoins(t *testing.T) {
+	for _, c := range []struct {
+		prev, next string
+		want       bool
+	}{
+		{"🇯", "🇵", true},     // a lone regional indicator pairs with the next
+		{"🇯🇵", "🇺", false},   // a complete flag does not take a third
+		{"e", "́", true}, // a combining mark extends its base
+		{"👩‍", "💻", true},
+		{"👩", "💻", false},
+		{"ᄀ", "ᅡ", true}, // Hangul L then V
+		{"─", "─", false},
+		{"a", "b", false},
+		{"日", "本", false},
+		{"", "🇵", false},
+	} {
+		if got := Joins(c.prev, c.next); got != c.want {
+			t.Errorf("Joins(%q, %q) = %v, want %v", c.prev, c.next, got, c.want)
+		}
+	}
+}

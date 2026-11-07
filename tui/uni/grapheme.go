@@ -93,3 +93,20 @@ func (st *clusterState) breaks(prev, cur prop) bool {
 	}
 	return true // GB999
 }
+
+// Joins reports whether next, written right after the cluster prev, would
+// continue prev's cluster instead of starting its own. Two lone regional
+// indicators join into a flag, for example. Empty strings never join.
+func Joins(prev, next string) bool {
+	if prev == "" || next == "" || next[0] < utf8.RuneSelf && prev[len(prev)-1] < utf8.RuneSelf {
+		return false
+	}
+	var st clusterState
+	var last prop
+	for _, r := range prev {
+		last = lookup(r)
+		st.accept(last)
+	}
+	r, _ := utf8.DecodeRuneInString(next)
+	return !st.breaks(last, lookup(r))
+}

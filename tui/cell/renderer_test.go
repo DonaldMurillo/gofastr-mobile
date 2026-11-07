@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/DonaldMurillo/gofastr-native/tui/cell"
+	"github.com/DonaldMurillo/gofastr-native/tui/uni"
 	"github.com/DonaldMurillo/gofastr-native/tui/vt"
 )
 
@@ -16,6 +17,7 @@ var graphemes = []struct {
 }{
 	{"a", 1}, {"b", 1}, {"Z", 1}, {" ", 1}, {" ", 1}, {" ", 1}, {"é", 1}, {"é", 1},
 	{"界", 2}, {"中", 2}, {"🙂", 2}, {"-", 1}, {"│", 1},
+	{"🇯", 1}, {"🇵", 1}, {"🇯🇵", 2},
 }
 
 var styles = []cell.Style{
@@ -103,7 +105,7 @@ func TestRendererMatchesEmulator(t *testing.T) {
 		options := cell.Options{Colors: cell.ColorTrue, SyncOutput: rng.IntN(2) == 0, StyledUnderline: true, Hyperlinks: true}
 		renderer := cell.NewRenderer(w, h, options)
 		screen := vt.New(w, h)
-		screen.Write([]byte("\x1b[?7l")) // the terminal layer turns autowrap off
+		screen.Write([]byte("\x1b[?7l\x1b[?2027h")) // grapheme-capable terminal, autowrap off
 		back := cell.NewBuffer(w, h)
 		for frame := range 30 {
 			if rng.IntN(20) == 0 {
@@ -122,6 +124,70 @@ func TestRendererMatchesEmulator(t *testing.T) {
 	}
 }
 
+func TestRendererKeepsAdjacentRegionalIndicatorsSeparate(t *testing.T) {
+	back := cell.NewBuffer(4, 1)
+	back.Set(0, 0, "🇯", 1, cell.Style{})
+	back.Set(1, 0, "🇵", 1, cell.Style{})
+	renderer := cell.NewRenderer(4, 1, cell.Options{})
+	screen := vt.New(4, 1)
+	screen.Write([]byte("\x1b[?7l\x1b[?2027h"))
+	screen.Write(renderer.Render(back, cell.Cursor{}))
+	check(t, screen, back, cell.Cursor{}, "separate Set calls")
+}
+
+func TestRendererKeepsIndependentGraphemesSeparate(t *testing.T) {
+	for _, pair := range [][2]string{{"ᄀ", "ᅡ"}, {"👩‍", "👩"}, {"a", "ा"}, {"🇯", "🇵"}} {
+		t.Run(pair[0]+"/"+pair[1], func(t *testing.T) {
+			back := cell.NewBuffer(12, 1)
+			renderer := cell.NewRenderer(12, 1, cell.Options{})
+			screen := vt.New(12, 1)
+			screen.Write([]byte("\x1b[?7l\x1b[?2027h"))
+			for _, x := range []int{0, 3, 1, 6} {
+				back.Clear()
+				back.Set(x, 0, pair[0], uni.Graphemes.Width(pair[0]), cell.Style{})
+				next := x + uni.Graphemes.Width(pair[0])
+				back.Set(next, 0, pair[1], uni.Graphemes.Width(pair[1]), cell.Style{})
+				screen.Write(renderer.Render(back, cell.Cursor{}))
+				check(t, screen, back, cell.Cursor{}, "independent clusters")
+			}
+		})
+	}
+}
+
+func TestStandaloneZeroWidthCellUsesReplacement(t *testing.T) {
+	for _, text := range []string{"\u0301", "\u200d", "\ufe0f"} {
+		t.Run(text, func(t *testing.T) {
+			back := cell.NewBuffer(4, 1)
+			back.Set(0, 0, "a", 1, cell.Style{})
+			if n := back.Set(1, 0, text, 0, cell.Style{}); n != 0 {
+				t.Fatalf("zero-width write used %d cells", n)
+			}
+			back.Set(1, 0, text, 1, cell.Style{})
+			if got := back.At(1, 0).Text; got != cell.Replacement {
+				t.Fatalf("standalone zero-width text = %q", got)
+			}
+			renderer := cell.NewRenderer(4, 1, cell.Options{})
+			screen := vt.New(4, 1)
+			screen.Write([]byte("\x1b[?7l\x1b[?2027h"))
+			screen.Write(renderer.Render(back, cell.Cursor{}))
+			check(t, screen, back, cell.Cursor{}, "zero-width cell after base")
+		})
+	}
+}
+
+func TestRendererGraphemeBoundariesAllocateNothing(t *testing.T) {
+	back := cell.NewBuffer(6, 1)
+	back.Set(0, 0, "🇯", 1, cell.Style{})
+	back.Set(1, 0, "🇵", 1, cell.Style{})
+	renderer := cell.NewRenderer(6, 1, cell.Options{})
+	if allocs := testing.AllocsPerRun(100, func() {
+		renderer.Invalidate()
+		renderer.Render(back, cell.Cursor{})
+	}); allocs != 0 {
+		t.Fatalf("renderer allocated %g times", allocs)
+	}
+}
+
 func TestUnchangedFrameWritesNothing(t *testing.T) {
 	back := cell.NewBuffer(80, 24)
 	back.Set(3, 3, "x", 1, cell.Style{Fg: cell.Red})
@@ -130,6 +196,24 @@ func TestUnchangedFrameWritesNothing(t *testing.T) {
 	renderer.Render(back, cursor)
 	if out := renderer.Render(back, cursor); len(out) != 0 {
 		t.Fatalf("unchanged frame wrote %q", out)
+	}
+}
+
+func TestInvalidateRestoresCursorVisibility(t *testing.T) {
+	for _, visible := range []bool{false, true} {
+		back := cell.NewBuffer(4, 1)
+		renderer := cell.NewRenderer(4, 1, cell.Options{})
+		screen := vt.New(4, 1)
+		cursor := cell.Cursor{Visible: visible}
+		screen.Write(renderer.Render(back, cursor))
+		if visible {
+			screen.Write([]byte("\x1b[?25l"))
+		} else {
+			screen.Write([]byte("\x1b[?25h"))
+		}
+		renderer.Invalidate()
+		screen.Write(renderer.Render(back, cursor))
+		check(t, screen, back, cursor, "external cursor change")
 	}
 }
 
@@ -263,5 +347,20 @@ func BenchmarkRenderOneCellChange(b *testing.B) {
 	for i := 0; b.Loop(); i++ {
 		back.Set(i%250, 40, string(rune('a'+i%26)), 1, cell.Style{})
 		renderer.Render(back, cell.Cursor{})
+	}
+}
+
+func TestRendererWritesNonASCIIRowsWithoutExtraMoves(t *testing.T) {
+	b := cell.NewBuffer(80, 1)
+	for x := 0; x < 80; x++ {
+		b.Set(x, 0, "─", 1, cell.Style{})
+	}
+	r := cell.NewRenderer(80, 1, cell.Options{})
+	out := string(r.Render(b, cell.Cursor{}))
+	if n := bytes.Count([]byte(out), []byte("─")); n != 80 {
+		t.Fatalf("%d of 80 cells written", n)
+	}
+	if n := bytes.Count([]byte(out), []byte("H")); n > 2 {
+		t.Fatalf("%d cursor positions for one row of box drawing:\n%q", n, out)
 	}
 }

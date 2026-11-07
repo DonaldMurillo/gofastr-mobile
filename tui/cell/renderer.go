@@ -2,6 +2,9 @@ package cell
 
 import (
 	"strconv"
+	"unicode/utf8"
+
+	"github.com/DonaldMurillo/gofastr-native/tui/uni"
 )
 
 // Options describe what the terminal supports. The zero value is the safest
@@ -40,7 +43,10 @@ type Renderer struct {
 	penValid    bool
 	x, y        int
 	cursorValid bool
-	shown       bool
+	// last is the cell text written just before the cursor, while no
+	// cursor movement has happened since; the next cell must not join it.
+	last  string
+	shown bool
 	shownValid  bool
 }
 
@@ -117,6 +123,7 @@ func (r *Renderer) repaintStart() {
 	r.front.Clear()
 	r.pen, r.penValid = Style{}, true
 	r.x, r.y, r.cursorValid = 0, 0, true
+	r.shownValid = false
 	r.full = false
 }
 
@@ -147,9 +154,15 @@ func (r *Renderer) renderRow(back *Buffer, y int) {
 			x += run
 			continue
 		}
+		// Separate cells must not merge into one grapheme, as two lone
+		// regional indicators would. A cursor move ends the cluster.
+		if r.cursorValid && r.x == x && r.y == y && uni.Joins(r.last, bc.Text) {
+			r.cursorValid = false
+		}
 		r.moveTo(x, y, brow, frow)
 		r.setPen(bc.Style)
 		r.out = append(r.out, bc.Text...)
+		r.last = bc.Text
 		frow[x] = bc
 		if bc.Width == 2 {
 			frow[x+1] = brow[x+1]
@@ -189,6 +202,8 @@ func (r *Renderer) moveTo(x, y int, brow, frow []Cell) {
 		for i := r.x; i < x; i++ {
 			r.out = append(r.out, brow[i].Text...)
 		}
+		r.x, r.y, r.last = x, y, brow[x-1].Text
+		return
 	case r.cursorValid:
 		r.alternate = r.appendRelative(r.alternate[:0], x, y)
 		if len(r.alternate) < len(r.scratch) {
@@ -199,17 +214,17 @@ func (r *Renderer) moveTo(x, y int, brow, frow []Cell) {
 	default:
 		r.out = append(r.out, r.scratch...)
 	}
-	r.x, r.y, r.cursorValid = x, y, true
+	r.x, r.y, r.cursorValid, r.last = x, y, true, ""
 }
 
-// canRewrite reports whether cells from..to are unchanged narrow cells in the
+// canRewrite reports whether cells from..to are unchanged ASCII cells in the
 // current pen, so writing them again moves the cursor without changing them.
 func (r *Renderer) canRewrite(brow, frow []Cell, from, to int) bool {
 	if !r.penValid {
 		return false
 	}
 	for i := from; i < to; i++ {
-		if brow[i] != frow[i] || brow[i].Width != 1 || r.effective(brow[i].Style) != r.pen {
+		if brow[i] != frow[i] || brow[i].Width != 1 || len(brow[i].Text) != 1 || brow[i].Text[0] >= utf8.RuneSelf || r.effective(brow[i].Style) != r.pen {
 			return false
 		}
 	}

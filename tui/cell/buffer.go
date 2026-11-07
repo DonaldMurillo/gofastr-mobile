@@ -1,6 +1,10 @@
 package cell
 
-import "unicode/utf8"
+import (
+	"unicode/utf8"
+
+	"github.com/DonaldMurillo/gofastr-native/tui/uni"
+)
 
 // Cell is one terminal cell. Text is one grapheme cluster of display Width 1
 // or 2. A width-2 cell is followed by a continuation cell with empty Text and
@@ -89,7 +93,8 @@ func (b *Buffer) Fill(x, y, width, height int, s Style) {
 // Set writes one grapheme of the given display width at x, y and returns the
 // number of columns it used: width, or 0 when nothing was written.
 //
-// Text containing control characters or invalid UTF-8 is drawn as U+FFFD.
+// Text containing control characters, invalid UTF-8, or only zero-width code
+// points (with a positive width supplied) is drawn as U+FFFD.
 // A width-2 grapheme that does not fit in the last column becomes a blank.
 func (b *Buffer) Set(x, y int, text string, width int, s Style) int {
 	if x < 0 || y < 0 || x >= b.width || y >= b.height || width <= 0 {
@@ -123,7 +128,8 @@ func (b *Buffer) release(row []Cell, x int) {
 	}
 }
 
-// safeText returns text if it is valid, printable UTF-8, else Replacement.
+// safeText returns text if it is valid UTF-8 with a printable base, else
+// Replacement. Marks and selectors with a base remain part of its cluster.
 func safeText(text string) string {
 	if len(text) == 1 {
 		if c := text[0]; c >= 0x20 && c < 0x7f {
@@ -140,6 +146,9 @@ func safeText(text string) string {
 			return Replacement
 		}
 		i += n
+	}
+	if uni.Graphemes.Width(text) == 0 {
+		return Replacement
 	}
 	return text
 }

@@ -62,6 +62,26 @@ func TestClusterDoesNotJoinAcrossCursorMoves(t *testing.T) {
 	}
 }
 
+func TestClusterDoesNotJoinAcrossExplicitPosition(t *testing.T) {
+	for _, position := range []string{"\x1b[1;2H", "\x1b[2G", "\x1b[D\x1b[C", "\r\x1b[C"} {
+		t.Run(position, func(t *testing.T) {
+			s := New(10, 1)
+			s.Write([]byte("\x1b[?2027h🇯" + position + "🇵"))
+			if s.Cell(0, 0).Text != "🇯" || s.Cell(1, 0).Text != "🇵" || len(s.Errors) != 0 {
+				t.Fatalf("explicit position joined cells: %q, errors %q", s.Line(0), s.Errors)
+			}
+		})
+	}
+}
+
+func TestWideningClusterRepairsOverlappedWideCell(t *testing.T) {
+	s := New(6, 1)
+	s.Write([]byte("\x1b[?2027h\x1b[1;2H界\x1b[H🇯🇵\x1b[1;3Hx"))
+	if s.Cell(0, 0).Text != "🇯🇵" || s.Cell(1, 0).Width != 0 || s.Cell(2, 0).Text != "x" {
+		t.Fatalf("overlap damaged flag: %q", s.Line(0))
+	}
+}
+
 func TestUnansweredQueriesAreIgnored(t *testing.T) {
 	s := New(10, 1)
 	s.Write([]byte("\x1b[?u\x1b]10;?\x1b\\\x1b]11;?\x07\x1b[>0q"))
