@@ -12,9 +12,9 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/DonaldMurillo/gofastr-native/tui/cell"
 	"github.com/DonaldMurillo/gofastr-native/tui/internal/ptytest"
 	"github.com/DonaldMurillo/gofastr-native/tui/term"
+	"github.com/DonaldMurillo/gofastr-native/tui/uni"
 	"github.com/DonaldMurillo/gofastr-native/tui/vt"
 )
 
@@ -52,14 +52,19 @@ func start(t *testing.T, cols, rows int) *session {
 			s.mu.Lock()
 			s.screen.Write(buf[:n])
 			s.raw.Write(buf[:n])
+			replies := s.screen.Replies
+			s.screen.Replies = nil
 			s.mu.Unlock()
+			if len(replies) > 0 {
+				master.Write(replies) // the emulator answers the probe
+			}
 			if err != nil {
 				return
 			}
 		}
 	}()
 	go func() {
-		s.done <- run(terminal, s.signals, cell.Options{Colors: cell.ColorTrue, SyncOutput: true})
+		s.done <- run(terminal, s.signals, func(string) string { return "" })
 		terminal.Close()
 	}()
 	t.Cleanup(func() {
@@ -196,5 +201,39 @@ func TestExitRestoresTerminal(t *testing.T) {
 func TestTerminatingSignalExits(t *testing.T) {
 	s := start(t, 40, 12)
 	s.signals <- syscall.SIGTERM
+	s.exit()
+}
+
+func TestProbeEnablesGraphemeClusters(t *testing.T) {
+	s := start(t, 100, 12)
+	s.waitFor("graphemes", func(screen *vt.Screen) bool { return screen.Modes[2027] })
+	s.mu.Lock()
+	line := s.screen.Line(1)
+	flag := strings.Index(line, "🇯🇵")
+	s.mu.Unlock()
+	if flag < 0 {
+		t.Fatalf("flag not drawn as one cluster: %q", line)
+	}
+	s.send("q")
+	raw := s.exit()
+	if !strings.Contains(raw, "\x1b[?2027l") {
+		t.Error("mode 2027 not disabled on exit")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.screen.Errors) > 0 {
+		t.Fatalf("emulator errors: %q", s.screen.Errors)
+	}
+}
+
+// TestColorSwatchFollowsText checks layout with wide clusters: the swatch
+// must start right after the sample text, whichever width method is in use.
+func TestColorSwatchFollowsText(t *testing.T) {
+	s := start(t, 100, 12)
+	s.waitFor("graphemes", func(screen *vt.Screen) bool {
+		x := 1 + uni.Graphemes.Width("wide 界🙂 · combining é · flag 🇯🇵 · family 👨‍👩‍👧 · color ")
+		return !screen.Cell(x, 1).Style.Bg.IsDefault() && !screen.Cell(x+1, 1).Style.Bg.IsDefault() && screen.Cell(x-1, 1).Style.Bg.IsDefault()
+	})
+	s.send("q")
 	s.exit()
 }

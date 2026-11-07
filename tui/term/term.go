@@ -44,6 +44,10 @@ var (
 	// KittyKeyboard pushes the kitty keyboard protocol's disambiguate flag.
 	// Terminals without the protocol ignore it.
 	KittyKeyboard = Mode{"kitty-keyboard", "\x1b[>1u", "\x1b[<u"}
+	// GraphemeClusters makes the terminal treat each grapheme cluster as one
+	// character (mode 2027). Enable it only when probe reports it available,
+	// and lay text out with uni.Graphemes while it is on.
+	GraphemeClusters = Mode{"grapheme-clusters", "\x1b[?2027h", "\x1b[?2027l"}
 )
 
 // MouseTracking is how much mouse input the terminal reports. The levels are

@@ -15,14 +15,18 @@ Each layer depends only on the layers below it.
 | `view` | Element tree reconciled by key, focus, hit testing, pointer capture, layers | planned |
 | `layout` | Constraints down, sizes up; flex rows and columns, wrapping, scrolling | planned |
 | `cell` | Cells, styles, color downgrade, the `Buffer`, and the diffing `Renderer` | done |
-| `uni` | Grapheme segmentation and width tables generated from Unicode data | planned |
+| `probe` | Capability queries at startup, ended by a DA1 sentinel | done |
+| `uni` | Grapheme clusters and column widths from generated Unicode 17 tables | done |
 | `input` | Bytes to `Key`, `Mouse`, `Paste`, `Focus` and query replies | done |
-| `probe` | Capability queries at startup, ended by a DA1 sentinel | planned |
 | `term` | Raw mode, private modes, mouse tracking, size, resize, cancellable reads, restore | done |
 | `vt` | In-memory terminal emulator used as the test oracle | done |
 
-`cmd/tui-demo` drives `term`, `input` and `cell` together: drag to paint,
-right-click to erase, scroll to change color.
+`probe` sits above `input` because it decodes the replies, and it reports
+results as `cell` options and a `uni` width method.
+
+`cmd/tui-demo` runs the whole startup path: probe, mode setup, then a paint
+loop. Drag to paint, right-click to erase, scroll to change color. The status
+line shows what the probe detected.
 
 ## How the pieces behave
 
@@ -53,6 +57,22 @@ in synchronized output (mode 2026) when enabled. Colors downgrade from RGB to
 256, 16 or none (`NO_COLOR`), and underline shapes and OSC 8 links are dropped
 when the terminal lacks them.
 
+`probe.Run` writes one batch of queries: mode reports for 2026 and 2027, the
+kitty keyboard flags, OSC 10 and 11 colors, XTVERSION, and DA1 last. Every
+terminal answers DA1 and answers in order, so the DA1 reply ends the wait;
+a terminal that answers nothing is given up on after 200 ms. Run takes the
+caller's decoder and returns keys typed during the probe, so no input is lost.
+Where the terminal is silent, `TERM`, `COLORTERM`, `NO_COLOR`, `TERM_PROGRAM`,
+`VTE_VERSION` and `WT_SESSION` decide the color depth, styled underlines and
+links.
+
+`uni` splits text into the units a terminal draws. `uni.Codepoints` follows
+terminals that advance per code point: a ZWJ family emoji takes 6 columns.
+`uni.Graphemes` follows mode 2027, where each extended grapheme cluster
+(UAX #29) is one character and the family takes 2. Lookups are a binary
+search over 1,785 generated ranges with an ASCII fast path, and allocate
+nothing.
+
 `Buffer.Set` replaces text that contains control characters or invalid UTF-8
 with U+FFFD, and the renderer strips non-printable bytes from link URLs.
 Application text therefore cannot inject escape sequences.
@@ -77,8 +97,20 @@ Application text therefore cannot inject escape sequences.
 - **Autowrap is off while running.** Writing the bottom-right cell can then never
   scroll the screen.
 - **Width follows the terminal, not Unicode.** Terminals disagree about emoji
-  widths. `uni` will use grapheme cluster widths when the terminal supports
-  mode 2027 and per-codepoint widths otherwise.
+  widths, so layout uses the model the terminal follows: grapheme clusters
+  when the probe finds mode 2027 (turned on if it is off), per-code-point
+  widths otherwise. A cluster takes the width of its widest code point;
+  VS16 makes an emoji base 2 columns and VS15 makes it 1; a regional
+  indicator pair is 2.
+- **Unicode tables are generated, not hand-written.** `uni/internal/gen`
+  builds them from the Unicode Character Database at the version Go's
+  `unicode` package uses (17.0.0 for Go 1.27), so the two agree. The
+  official GraphemeBreakTest.txt is checked in as test data.
+- **Probe once, at startup, with a sentinel.** Querying later would mix
+  replies into user input. A fixed timeout alone would either wait too long
+  on every start or miss slow terminals; DA1 ends the wait as soon as the
+  terminal has answered everything. Replies that arrive after the timeout
+  reach the program as ordinary events, which it ignores.
 
 ## Verification
 
@@ -89,7 +121,9 @@ commands with `GOWORK=off` (or add `./tui` to your `go.work`):
 cd tui
 GOWORK=off go test -race ./...
 GOWORK=off go test -run '^$' -fuzz FuzzDecoder -fuzztime 60s ./input
-GOWORK=off go test -run '^$' -bench . ./cell
+GOWORK=off go test -run '^$' -fuzz FuzzUnits -fuzztime 60s ./uni
+GOWORK=off go test -run '^$' -bench . ./cell ./uni
+(cd uni && GOWORK=off go generate)  # downloads the UCD once into the user cache
 for t in windows/amd64 windows/arm64 linux/amd64 linux/arm64 freebsd/amd64 darwin/amd64; do
   GOOS=${t%/*} GOARCH=${t#*/} GOWORK=off go vet ./...
 done
@@ -106,14 +140,32 @@ What the tests cover:
 - `input`: a table of real terminal sequences, byte-at-a-time delivery decoding
   identically to one read, paste limits, and a fuzz target (32 million runs
   without a failure so far).
+- `uni`: all 766 cases of the official grapheme break test, a width table
+  covering emoji sequences, CJK, Hangul jamo, Indic conjuncts and controls in
+  both methods, a sweep of every code point against the `unicode` package,
+  and a fuzz target checking that units rebuild the input. Disabling the
+  conjunct (GB9c), emoji ZWJ (GB11) or flag (GB12/13) rule fails the
+  conformance test. Width of 180 bytes of ASCII takes 340 ns.
+- `probe`: scripted terminals that answer fully, answer in 3-byte pieces,
+  answer only DA1, or stay silent, with keys and clicks mixed into the
+  replies, plus the environment fallbacks.
+- `vt`: query replies, mode 2027 clustering (flags, ZWJ sequences, VS16
+  widening) and per-code-point advance.
 - `term`: raw mode and exact termios restore, size, unbuffered binary-clean
   reads, read timeout, `Close` interrupting a blocked read, and restore order,
   all against a real pseudo-terminal on macOS and Linux.
 - `cmd/tui-demo`: the demo runs on a pty while tests send real mouse bytes and
   check the emulated screen: click and drag painting, right-click erase, wheel,
-  resize, the Escape timeout, signals, and restore on exit.
+  resize, the Escape timeout, signals, and restore on exit. The emulator
+  answers the probe, so the tests also cover mode 2027 being turned on, wide
+  clusters laid out to the column, and the mode turned off on exit.
 
 Not yet verified: Windows has been compiled and vetted, not run. The console
 input path, including the mouse record conversion, needs a real Windows
 Terminal and conhost session. SIGWINCH delivery and `Suspend` have not been
-exercised by an automated test.
+exercised by an automated test. The probe's terminal table and the
+cluster-width rules come from documentation, not from runs against each
+terminal; the per-terminal results still need checking by hand. Two clusters
+drawn into adjacent cells by separate `Set` calls can merge on a mode 2027
+terminal (two lone regional indicators become a flag), and the renderer does
+not guard against that yet.

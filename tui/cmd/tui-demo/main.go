@@ -10,8 +10,9 @@ import (
 
 	"github.com/DonaldMurillo/gofastr-native/tui/cell"
 	"github.com/DonaldMurillo/gofastr-native/tui/input"
+	"github.com/DonaldMurillo/gofastr-native/tui/probe"
 	"github.com/DonaldMurillo/gofastr-native/tui/term"
-	"github.com/DonaldMurillo/gofastr-native/tui/vt"
+	"github.com/DonaldMurillo/gofastr-native/tui/uni"
 )
 
 func main() {
@@ -20,23 +21,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "tui-demo:", err)
 		os.Exit(1)
 	}
-	err = run(t, notifySignals(), colorOptions())
+	err = run(t, notifySignals(), os.Getenv)
 	t.Close()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tui-demo:", err)
 		os.Exit(1)
 	}
-}
-
-func colorOptions() cell.Options {
-	options := cell.Options{Colors: cell.Color256, SyncOutput: true}
-	if ct := os.Getenv("COLORTERM"); ct == "truecolor" || ct == "24bit" {
-		options.Colors = cell.ColorTrue
-	}
-	if _, ok := os.LookupEnv("NO_COLOR"); ok {
-		options.Colors = cell.ColorNone
-	}
-	return options
 }
 
 var palette = []cell.Color{
@@ -45,6 +35,8 @@ var palette = []cell.Color{
 }
 
 type demo struct {
+	caps    probe.Result
+	method  uni.Method
 	size    term.Size
 	painted map[[2]int]cell.Color
 	color   int
@@ -55,13 +47,23 @@ type demo struct {
 
 // run drives one session until q, a terminating signal, or a read error.
 // It restores the terminal on panic before re-panicking.
-func run(t *term.Terminal, signals <-chan os.Signal, options cell.Options) (err error) {
+func run(t *term.Terminal, signals <-chan os.Signal, getenv func(string) string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			t.Close()
 			panic(r)
 		}
 	}()
+	var decoder input.Decoder
+	caps, early, err := probe.Run(t, &decoder, probe.DefaultTimeout, getenv)
+	if err != nil {
+		return err
+	}
+	if caps.Graphemes == probe.Available {
+		if err := t.Set(term.GraphemeClusters, true); err != nil {
+			return err
+		}
+	}
 	for _, m := range []term.Mode{term.AltScreen, term.NoAutowrap, term.BracketedPaste, term.FocusEvents, term.KittyKeyboard} {
 		if err := t.Set(m, true); err != nil {
 			return err
@@ -74,14 +76,17 @@ func run(t *term.Terminal, signals <-chan os.Signal, options cell.Options) (err 
 	if err != nil {
 		return err
 	}
-	d := &demo{size: size, painted: map[[2]int]cell.Color{}, last: "waiting for input"}
+	d := &demo{caps: caps, method: caps.Method(), size: size, painted: map[[2]int]cell.Color{}, last: "waiting for input"}
+	for _, e := range early {
+		d.handle(e)
+	}
 	back := cell.NewBuffer(size.Cols, size.Rows)
-	renderer := cell.NewRenderer(size.Cols, size.Rows, options)
+	renderer := cell.NewRenderer(size.Cols, size.Rows, caps.Options())
 	defer func() { t.Write(renderer.Reset()) }()
 
 	events := make(chan input.Event, 256)
 	readErr := make(chan error, 1)
-	go readInput(t, events, readErr)
+	go readInput(t, &decoder, events, readErr)
 
 	for {
 		back.Resize(d.size.Cols, d.size.Rows)
@@ -129,10 +134,10 @@ func run(t *term.Terminal, signals <-chan os.Signal, options cell.Options) (err 
 	}
 }
 
-// readInput owns the decoder. When a lone ESC is held it waits only briefly
-// for the rest of a sequence before deciding it was the Escape key.
-func readInput(t *term.Terminal, events chan<- input.Event, readErr chan<- error) {
-	var decoder input.Decoder
+// readInput takes over the decoder from the probe. When a lone ESC is held
+// it waits only briefly for the rest of a sequence before deciding it was the
+// Escape key.
+func readInput(t *term.Terminal, decoder *input.Decoder, events chan<- input.Event, readErr chan<- error) {
 	emit := func(e input.Event) { events <- e }
 	buf := make([]byte, 4096)
 	for {
@@ -194,29 +199,37 @@ func (d *demo) draw(b *cell.Buffer) {
 	b.Clear()
 	title := cell.Style{Attrs: cell.Reverse | cell.Bold}
 	b.Fill(0, 0, b.Width(), 1, title)
-	drawText(b, 1, 0, "gofastr tui · drag to paint · right-click erases · scroll for color · c clears · q quits", title)
-	drawText(b, 1, 1, "wide 界🙂 · combining é · color", cell.Style{Attrs: cell.Dim})
-	b.Set(32, 1, " ", 1, cell.Style{Bg: palette[d.color]})
-	b.Set(33, 1, " ", 1, cell.Style{Bg: palette[d.color]})
+	d.drawText(b, 1, 0, "gofastr tui · drag to paint · right-click erases · scroll for color · c clears · q quits", title)
+	x := d.drawText(b, 1, 1, "wide 界🙂 · combining e\u0301 · flag 🇯🇵 · family 👨\u200d👩\u200d👧 · color ", cell.Style{Attrs: cell.Dim})
+	b.Fill(x, 1, 2, 1, cell.Style{Bg: palette[d.color]})
 	for at, color := range d.painted {
 		if d.inCanvas(at[0], at[1]) {
 			b.Set(at[0], at[1], " ", 1, cell.Style{Bg: color})
 		}
 	}
 	status := cell.Style{Fg: cell.BrightBlack}
-	drawText(b, 1, b.Height()-1, fmt.Sprintf("%dx%d · %s", d.size.Cols, d.size.Rows, d.last), status)
+	d.drawText(b, 1, b.Height()-1, fmt.Sprintf("%dx%d · %s · %s", d.size.Cols, d.size.Rows, d.last, d.capabilities()), status)
 }
 
-// drawText draws a single line of text, clipped at the right edge.
-// Width rules here are minimal until the uni package lands.
-func drawText(b *cell.Buffer, x, y int, text string, s cell.Style) {
-	runes := []rune(text)
-	for i := 0; i < len(runes) && x < b.Width(); i++ {
-		grapheme, width := string(runes[i]), max(vt.RuneWidth(runes[i]), 1)
-		for i+1 < len(runes) && vt.RuneWidth(runes[i+1]) == 0 {
-			i++
-			grapheme += string(runes[i])
-		}
-		x += b.Set(x, y, grapheme, width, s)
+func (d *demo) capabilities() string {
+	name := d.caps.Name
+	if name == "" {
+		name = "unknown terminal"
 	}
+	colors := map[cell.ColorMode]string{cell.ColorNone: "no color", cell.Color16: "16 colors", cell.Color256: "256 colors", cell.ColorTrue: "truecolor"}[d.caps.Colors]
+	return fmt.Sprintf("%s, %s, %s", name, colors, d.method)
+}
+
+// drawText draws one line of text clipped at the right edge and returns the
+// column after it.
+func (d *demo) drawText(b *cell.Buffer, x, y int, text string, s cell.Style) int {
+	for unit, width := range d.method.Units(text) {
+		if x >= b.Width() {
+			break
+		}
+		if width > 0 {
+			x += b.Set(x, y, unit, width, s)
+		}
+	}
+	return x
 }
