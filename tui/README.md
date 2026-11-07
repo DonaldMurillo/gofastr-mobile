@@ -10,10 +10,10 @@ Each layer depends only on the layers below it.
 
 | Package | Owns | Status |
 |---|---|---|
-| `app` | Event loop, frame scheduler, `Post` for background results | planned |
-| `widget` | Text, list, table, input, textarea, scroll, split, menu, modal | planned |
-| `view` | Element tree reconciled by key, focus, hit testing, pointer capture, layers | planned |
-| `layout` | Constraints down, sizes up; flex rows and columns, wrapping, scrolling | planned |
+| `app` | Event loop, redraw scheduling, `Post` and `Every` for background work, OSC 52 copy | done |
+| `widget` | Text, flex, box, panel, button, input, textarea, scroll, list, table, split, tabs, sparkline, modal | done |
+| `view` | Element tree reconciled by key, focus and traps, hit testing, pointer capture, hover, selection, layers | done |
+| `layout` | Constraints down, sizes up; sizing rules and space distribution | done |
 | `cell` | Cells, styles, color downgrade, the `Buffer`, and the diffing `Renderer` | done |
 | `probe` | Capability queries at startup, ended by a DA1 sentinel | done |
 | `uni` | Grapheme clusters and column widths from generated Unicode 17 tables | done |
@@ -24,7 +24,8 @@ Each layer depends only on the layers below it.
 `probe` sits above `input` because it decodes the replies, and it reports
 results as `cell` options and a `uni` width method.
 
-`cmd/tui-demo` runs the whole startup path: probe, mode setup, then a paint
+`cmd/netmon` is the test app: a read-only network connection monitor built on
+every layer. `cmd/tui-demo` runs the whole startup path: probe, mode setup, then a paint
 loop. Drag to paint, right-click to erase, scroll to change color. The status
 line shows what the probe detected.
 
@@ -77,6 +78,59 @@ nothing.
 with U+FFFD, and the renderer strips non-printable bytes from link URLs.
 Application text therefore cannot inject escape sequences.
 
+`view` keeps a retained tree behind a declarative description. Each frame the
+program returns an `Element` tree of plain values. The tree matches them to
+the nodes it kept by widget type and key (position when unkeyed), so a node's
+state, focus, hover and pointer capture survive the rebuild. A `Builder`
+widget produces its children during layout, once it knows its size; the list
+uses this to build only the visible rows. A press focuses the nearest
+focusable ancestor of the cell under the pointer, then goes to the deepest
+node that takes it, and that node captures the pointer until every button is
+up. Presses on the same cell within 400 ms count as a double or triple click.
+A left drag that no node takes selects screen text, and the release copies
+it. A `FocusTrap` widget (the modal) keeps Tab inside itself and gives focus
+back to the node that had it when it closes.
+
+`widget` widgets are controlled: they draw the `Value` they are given and
+report edits through `OnChange`, so the program's state is the only copy.
+State that belongs to the widget, such as a caret or a scroll offset, lives on
+its node. `List` and `Table` handle a million rows because they lay out only
+the rows on screen. Column widths come from the `layout` sizing rules over
+the visible rows.
+
+`app` owns the terminal for the life of `Run`. It probes, enables the alt
+screen, bracketed paste, focus events and the kitty keyboard protocol, then
+reads input on a goroutine. Everything that touches the tree runs on one loop
+goroutine; `Post` hands it work from elsewhere and `Every` posts on a timer,
+dropping ticks while one is still queued. After any event that changed
+state the loop rebuilds the tree before the next event. A burst of events
+still costs one terminal write, because the loop drains the queue before
+flushing. Ctrl+C quits and ctrl+z suspends unless a widget or `Unhandled`
+takes the key. A panic restores the terminal before it propagates.
+
+## netmon
+
+`cmd/netmon` lists the machine's sockets and the processes holding them. It
+reads `lsof -nP -i` on macOS and the BSDs, `/proc/net` and `/proc/*/fd` on
+Linux, and `netstat -ano` with `tasklist` on Windows. It never closes a
+connection or signals a process. Without root it sees only the current
+user's processes.
+
+```sh
+cd tui
+GOWORK=off go run ./cmd/netmon              # refresh every 2 s
+GOWORK=off go run ./cmd/netmon -every 500ms
+GOWORK=off go run ./cmd/netmon -fake 5000   # 5,000 simulated sockets that churn
+```
+
+Click a column header or press 1 to 6 to sort, and again to reverse. Type `/`
+to filter: every word must match the protocol, an address, the state, the
+PID or the process. Enter or a double click filters by the selected row's
+process. Escape leaves the filter, then clears it. `p` pauses, `r` refreshes,
+`?` lists the keys and `q` quits. The line above the details pane drags to
+resize it. Sockets that appeared in the latest refresh are green, and the
+selection stays on its socket when rows move.
+
 ## Decisions
 
 2026-11-06, agreed in conversation:
@@ -112,6 +166,21 @@ Application text therefore cannot inject escape sequences.
   terminal has answered everything. Replies that arrive after the timeout
   reach the program as ordinary events, which it ignores.
 
+2026-11-07, found while building the widgets and netmon:
+
+- **Rebuild between events.** Controlled widgets compute an edit from the
+  value they were built with. With one build per burst, typing "hello" in
+  one read left only "o", since each key edited the same stale value. The
+  loop now rebuilds after any event that changed state, and still writes to
+  the terminal once per burst.
+- **Flex sizes its cross axis to its content** unless the constraint is
+  tight. A row inside a column used to stretch to the column's full height.
+- **The split divider is its own node.** `Hovered` is true for every
+  ancestor of the hovered node, so a divider drawn by the split highlighted
+  whenever either pane was hovered.
+- **Copy uses OSC 52.** It is the only clipboard path that works over ssh and
+  needs no platform code. Terminals without it ignore the request.
+
 ## Verification
 
 This module is not listed in the repository's local `go.work`, so run its
@@ -123,6 +192,7 @@ GOWORK=off go test -race ./...
 GOWORK=off go test -run '^$' -fuzz FuzzDecoder -fuzztime 60s ./input
 GOWORK=off go test -run '^$' -fuzz FuzzUnits -fuzztime 60s ./uni
 GOWORK=off go test -run '^$' -bench . ./cell ./uni
+GOWORK=off go run ./cmd/netmon -fake 5000   # by hand: a load test
 (cd uni && GOWORK=off go generate)  # downloads the UCD once into the user cache
 for t in windows/amd64 windows/arm64 linux/amd64 linux/arm64 freebsd/amd64 darwin/amd64; do
   GOOS=${t%/*} GOARCH=${t#*/} GOWORK=off go vet ./...
@@ -154,13 +224,35 @@ What the tests cover:
 - `term`: raw mode and exact termios restore, size, unbuffered binary-clean
   reads, read timeout, `Close` interrupting a blocked read, and restore order,
   all against a real pseudo-terminal on macOS and Linux.
+- `layout` and `view`: space distribution, keyed reconcile keeping state
+  across reorders, hit testing through layers and clips, capture, hover
+  enter and leave, click counting, focus order, traps and restore, and text
+  selection.
+- `widget`: each widget rendered through a real tree into a buffer and driven
+  with key and mouse events, including a list of 1,000,000 rows, table
+  sorting by header click, split dragging, modal focus, and the nested-flex
+  regression. Mutation checks confirmed that tests fail when the
+  release-inside-button check or the modal's Tab trap is removed.
+- `app`: the loop on a pty: typing and clicking, `Post` from another
+  goroutine, `Every`, `Unhandled`, selection copied as OSC 52, resize, and
+  terminal restore after a panic. A mutation check confirmed the typing test
+  fails without the rebuild between events.
+- `cmd/netmon`: the lsof, `/proc/net` (IPv4, IPv6 and IPv4-mapped),
+  netstat and tasklist parsers against fixtures, and the model driven through
+  a real tree: filter, sort by key and by header click, selection tracking
+  across refreshes, double click and Enter, pause, the busy guard, errors,
+  the help modal, new-row highlighting, an 80x24 layout check, and a
+  50,000-row table. Removing the busy guard or the select-by-key lookup fails
+  the tests. On macOS the binary also ran on a pty, against lsof and with
+  `-fake 5000 -every 100ms`, and exited cleanly.
 - `cmd/tui-demo`: the demo runs on a pty while tests send real mouse bytes and
   check the emulated screen: click and drag painting, right-click erase, wheel,
   resize, the Escape timeout, signals, and restore on exit. The emulator
   answers the probe, so the tests also cover mode 2027 being turned on, wide
   clusters laid out to the column, and the mode turned off on exit.
 
-Not yet verified: Windows has been compiled and vetted, not run. The console
+Not yet verified: Windows has been compiled and vetted, not run, and so has
+netmon's netstat source. The console
 input path, including the mouse record conversion, needs a real Windows
 Terminal and conhost session. SIGWINCH delivery and `Suspend` have not been
 exercised by an automated test. The probe's terminal table and the
