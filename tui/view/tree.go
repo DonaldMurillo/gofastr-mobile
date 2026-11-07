@@ -31,7 +31,8 @@ type Tree struct {
 	size       layout.Size
 
 	focus, hover, captor *Node
-	buttons              int // pointer buttons held down
+	saved                *Node // focus before a focus trap took it
+	buttons              int   // pointer buttons held down
 
 	lastPress      time.Time
 	lastPressPos   layout.Point
@@ -148,16 +149,56 @@ func focusable(n *Node) bool {
 	return ok && f.Focusable() && !n.clip.Empty()
 }
 
+// autoFocus keeps focus valid after a frame: on a laid-out node inside the
+// current focus scope. A focus trap that appears takes focus and gives it
+// back when it goes away.
 func (t *Tree) autoFocus() {
-	if t.focus != nil && t.focus.mounted && t.focus.frame == t.frame {
+	scope := t.scope()
+	if t.focus != nil && (!t.focus.mounted || t.focus.frame != t.frame) {
+		t.focus = nil
+	}
+	if t.focus != nil && !within(t.focus, scope) {
+		t.saved = t.focus
+		t.SetFocus(nil)
+	}
+	if t.focus == nil && scope == t.root && t.saved != nil {
+		saved := t.saved
+		t.saved = nil
+		if saved.mounted && saved.frame == t.frame && focusable(saved) {
+			t.SetFocus(saved)
+			return
+		}
+	}
+	if t.focus != nil {
 		return
 	}
-	t.focus = nil
-	t.walk(t.scope(), func(n *Node) {
-		if a, ok := n.widget.(AutoFocuser); ok && t.focus == nil && a.AutoFocus() && focusable(n) {
-			t.focus = n
+	var first, auto *Node
+	t.walk(scope, func(n *Node) {
+		if !focusable(n) {
+			return
+		}
+		if first == nil {
+			first = n
+		}
+		if a, ok := n.widget.(AutoFocuser); ok && auto == nil && a.AutoFocus() {
+			auto = n
 		}
 	})
+	switch {
+	case auto != nil:
+		t.SetFocus(auto)
+	case scope != t.root && first != nil:
+		t.SetFocus(first) // a dialog always has its first control focused
+	}
+}
+
+func within(n, ancestor *Node) bool {
+	for ; n != nil; n = n.parent {
+		if n == ancestor {
+			return true
+		}
+	}
+	return false
 }
 
 // scope returns the subtree focus traversal is limited to: the newest focus
@@ -267,7 +308,11 @@ func (t *Tree) Dispatch(e input.Event) bool {
 	case input.Mouse:
 		return t.pointer(e)
 	case input.Key:
-		if t.bubble(t.focus, KeyEvent{e}) {
+		start := t.focus
+		if start == nil {
+			start = t.scope() // with nothing focused, keys go to the dialog or root
+		}
+		if t.bubble(start, KeyEvent{e}) {
 			return true
 		}
 		if e.Code == input.KeyTab && e.Mods&^input.ModShift == 0 {
@@ -279,7 +324,11 @@ func (t *Tree) Dispatch(e input.Event) bool {
 		}
 		return false
 	case input.Paste:
-		return t.bubble(t.focus, PasteEvent{e})
+		start := t.focus
+		if start == nil {
+			start = t.scope()
+		}
+		return t.bubble(start, PasteEvent{e})
 	}
 	return false
 }

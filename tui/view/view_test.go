@@ -340,19 +340,37 @@ func TestFocusTrapAndAutoFocus(t *testing.T) {
 		E(box{name: "y", w: 1, h: 1, focusable: true}),
 	).WithKey("dialog")
 	frame(tr, 6, 4, E(col{}, base, dialog))
-	// base still has focus, so autofocus does not steal it, but Tab stays
-	// inside the dialog.
+	// The dialog takes focus from base, on its autofocus control, and Tab
+	// stays inside it.
+	if name := tr.Focused().Widget().(box).name; name != "x" {
+		t.Fatalf("dialog opened with focus on %q", name)
+	}
 	for range 3 {
 		tr.Dispatch(input.Key{Code: input.KeyTab})
 		if name := tr.Focused().Widget().(box).name; name != "x" && name != "y" {
 			t.Fatalf("Tab left the dialog for %q", name)
 		}
 	}
+	// Closing the dialog gives focus back to base.
+	frame(tr, 6, 4, E(col{}, base))
+	if tr.Focused() == nil || tr.Focused().Widget().(box).name != "base" {
+		t.Fatalf("focus after the dialog closed: %v", tr.Focused())
+	}
 	// A fresh tree with the dialog autofocuses x.
 	tr2 := NewTree(uni.Graphemes)
 	frame(tr2, 6, 4, E(col{}, base, dialog))
 	if tr2.Focused() == nil || tr2.Focused().Widget().(box).name != "x" {
 		t.Fatal("autofocus inside the trap did not happen")
+	}
+}
+
+func TestKeysWithoutFocusReachTheRoot(t *testing.T) {
+	l := &log{}
+	tr := NewTree(uni.Graphemes)
+	frame(tr, 4, 2, E(box{name: "r", w: 4, h: 2, log: l}, E(box{name: "c", w: 1, h: 1})))
+	tr.Dispatch(input.Key{Code: input.KeyRune, Rune: 'q'})
+	if got := l.take(); !slices.Equal(got, []string{"r key q"}) {
+		t.Fatalf("got %q", got)
 	}
 }
 
