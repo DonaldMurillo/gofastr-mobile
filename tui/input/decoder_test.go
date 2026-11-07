@@ -69,7 +69,7 @@ func TestDecode(t *testing.T) {
 		{"xtversion", "\x1bP>|kitty(0.40.0)\x1b\\", []Event{TerminalVersion{Name: "kitty(0.40.0)"}}},
 		{"xtversion strips controls", "\x1bP>|a\x01b\x1b\\", []Event{TerminalVersion{Name: "ab"}}},
 		{"unknown csi dropped", "\x1b[99q" + "a", []Event{Key{Rune: 'a'}}},
-		{"apc dropped", "\x1b_Gi=1;OK\x1b\\a", []Event{Key{Rune: 'a'}}},
+		{"graphics reply", "\x1b_Gi=1;OK\x1b\\a", []Event{GraphicsReply{ID: 1, Message: "OK"}, Key{Rune: 'a'}}},
 		{"malformed csi keeps next", "\x1b[12\x01", []Event{Key{Rune: 'a', Mods: ModCtrl}}},
 		{"invalid utf8 dropped", "\xffa\xc2\x85", []Event{Key{Rune: 'a'}}},
 		{"forced incomplete csi is alt+[", "\x1b[", []Event{Key{Rune: '[', Mods: ModAlt}}},

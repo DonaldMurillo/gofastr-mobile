@@ -17,6 +17,8 @@ const DoubleClick = 400 * time.Millisecond
 // Tree holds the retained nodes and the interaction state attached to them.
 // It is not safe for concurrent use; the app loop owns it.
 type Tree struct {
+	Images                cell.ImageProtocol
+	CellWidth, CellHeight int
 	// Method is the width model for text. Set it before the first frame.
 	Method uni.Method
 	// OnCopy receives text the user selected with the mouse. The app
@@ -104,7 +106,7 @@ func (t *Tree) draw(n *Node, buf *cell.Buffer) {
 	if n.frame != t.frame || n.clip.Empty() {
 		return
 	}
-	c := &Canvas{buf: buf, origin: n.rect.Origin(), size: n.size, clip: n.clip, method: t.Method}
+	c := &Canvas{buf: buf, origin: n.rect.Origin(), size: n.size, clip: n.clip, method: t.Method, images: t.Images, cellWidth: t.CellWidth, cellHeight: t.CellHeight}
 	n.widget.Draw(n, c)
 	for _, child := range n.children {
 		t.draw(child, buf)

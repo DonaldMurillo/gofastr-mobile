@@ -295,6 +295,8 @@ func parseString(b []byte) (Event, int) {
 				return oscEvent(body), i + 2
 			case 'P':
 				return dcsEvent(body), i + 2
+			case '_':
+				return graphicsEvent(body), i + 2
 			}
 			return nil, i + 2
 		}
@@ -481,6 +483,10 @@ func (d *Decoder) csiEvent(s csi) Event {
 	}
 	mods := modifiers(s.param(1, 1))
 	switch s.final {
+	case 't':
+		if s.param(0, 0) == 6 && len(s.params) == 3 && s.param(1, 0) > 0 && s.param(2, 0) > 0 {
+			return CellSize{Width: s.param(2, 0), Height: s.param(1, 0)}
+		}
 	case '~':
 		return d.tildeKey(s, mods)
 	case 'A', 'B', 'C', 'D', 'H', 'F':

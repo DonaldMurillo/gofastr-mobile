@@ -67,6 +67,7 @@ func TestModernTerminal(t *testing.T) {
 		t.Fatalf("unexpected events %v", other)
 	}
 	want := Result{
+		CellWidth: 10, CellHeight: 20,
 		Replied: true, Name: "ghostty 1.1.0",
 		SyncOutput: Available, Graphemes: Available, KittyKeyboard: true,
 		Foreground: RGB{0xdd, 0xdd, 0xdd}, HasForeground: true,

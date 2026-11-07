@@ -24,7 +24,9 @@ const DefaultTimeout = 200 * time.Millisecond
 // Query is the byte sequence Run writes: mode reports for synchronized output
 // (2026) and grapheme clusters (2027), the kitty keyboard flags, the default
 // foreground and background colors, XTVERSION, then DA1.
-const Query = "\x1b[?2026$p" + "\x1b[?2027$p" + "\x1b[?u" + "\x1b]10;?\x1b\\" + "\x1b]11;?\x1b\\" + "\x1b[>0q" + "\x1b[c"
+// GraphicsQueryID distinguishes our one-pixel query from unrelated replies.
+const GraphicsQueryID = 2147483647
+const Query = "\x1b[?2026$p" + "\x1b[?2027$p" + "\x1b[?u" + "\x1b]10;?\x1b\\" + "\x1b]11;?\x1b\\" + "\x1b[>0q" + "\x1b[16t" + "\x1b_Gi=2147483647,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\" + "\x1b[c"
 
 // Conn is the part of a terminal the probe uses; *term.Terminal has it.
 // Read returns 0, nil when the timeout passes without input.
@@ -61,6 +63,8 @@ type RGB struct{ R, G, B uint8 }
 
 // Result is what the terminal and environment say.
 type Result struct {
+	Images                cell.ImageProtocol
+	CellWidth, CellHeight int
 	// Replied is true when the DA1 reply arrived before the timeout.
 	Replied bool
 	// Name is the XTVERSION reply, for example "kitty(0.40.0)".
@@ -81,6 +85,7 @@ type Result struct {
 // Options returns renderer options for the detected terminal.
 func (r Result) Options() cell.Options {
 	return cell.Options{
+		Images: r.Images, CellWidth: r.CellWidth, CellHeight: r.CellHeight,
 		Colors:          r.Colors,
 		SyncOutput:      r.SyncOutput != Unsupported,
 		StyledUnderline: r.StyledUnderline,
@@ -128,7 +133,22 @@ func Run(c Conn, d *input.Decoder, timeout time.Duration, getenv func(string) st
 		}
 		switch e := e.(type) {
 		case input.DeviceAttributes:
+			for _, attr := range e.Params {
+				if attr == 4 && r.Images != cell.ImageKitty {
+					r.Images = cell.ImageSixel
+				}
+			}
 			r.Replied = true
+		case input.GraphicsReply:
+			if e.ID == GraphicsQueryID {
+				if e.Message == "OK" {
+					r.Images = cell.ImageKitty
+				}
+			} else {
+				other = append(other, e)
+			}
+		case input.CellSize:
+			r.CellWidth, r.CellHeight = e.Width, e.Height
 		case input.ModeReport:
 			switch e.Mode {
 			case 2026:
@@ -171,6 +191,14 @@ func Run(c Conn, d *input.Decoder, timeout time.Duration, getenv func(string) st
 		d.Feed(buf[:n], emit)
 	}
 	r.detect(getenv)
+	if r.CellWidth <= 0 || r.CellHeight <= 0 {
+		if pixels, ok := c.(interface{ CellPixels() (int, int) }); ok {
+			r.CellWidth, r.CellHeight = pixels.CellPixels()
+		}
+	}
+	if r.CellWidth <= 0 || r.CellHeight <= 0 {
+		r.CellWidth, r.CellHeight = 10, 20
+	}
 	return r, other, nil
 }
 
@@ -192,6 +220,10 @@ var terminals = []struct {
 }
 
 func (r *Result) detect(getenv func(string) string) {
+	program := strings.ToLower(getenv("TERM_PROGRAM"))
+	if r.Images == cell.ImageNone && (program == "iterm.app" || strings.HasPrefix(program, "wezterm")) {
+		r.Images = cell.ImageITerm
+	}
 	r.Colors = cell.Color256
 	termName := getenv("TERM")
 	switch {

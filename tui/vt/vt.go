@@ -12,6 +12,7 @@ package vt
 import (
 	"encoding/base64"
 	"fmt"
+	"image"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -22,7 +23,17 @@ import (
 
 // Screen is an emulated terminal screen.
 type Screen struct {
-	Width, Height int
+	Images                map[uint32]ImageData
+	Placements            []ImagePlacement
+	CellWidth, CellHeight int
+	stringKind            byte
+	graphicsChunk         []byte
+	graphicsControl       map[string]int
+	graphicsAction        byte
+	inlineID              uint32
+	mainImages            map[uint32]ImageData
+	mainPlacements        []ImagePlacement
+	Width, Height         int
 	// X and Y are the zero-based cursor position.
 	X, Y          int
 	CursorVisible bool
@@ -65,7 +76,7 @@ const (
 // New returns a blank screen with autowrap on and the cursor visible, like a
 // freshly opened terminal.
 func New(width, height int) *Screen {
-	s := &Screen{Width: width, Height: height, CursorVisible: true, Autowrap: true, Modes: map[int]bool{}, RuneWidth: uni.RuneWidth}
+	s := &Screen{Width: width, Height: height, CursorVisible: true, Autowrap: true, Modes: map[int]bool{}, RuneWidth: uni.RuneWidth, Images: map[uint32]ImageData{}, CellWidth: 10, CellHeight: 20}
 	s.cells = make([]cell.Cell, width*height)
 	for i := range s.cells {
 		s.cells[i] = cell.Blank
@@ -180,6 +191,7 @@ func (s *Screen) escape(c byte) {
 	case ']':
 		s.state, s.strEsc = oscState, false
 	case 'P', '_', '^', 'X':
+		s.stringKind = c
 		s.state, s.strEsc = stringState, false
 	default:
 		s.state = ground
@@ -210,9 +222,19 @@ func (s *Screen) endString() {
 	state := s.state
 	s.state = ground
 	if state != oscState {
+		if s.stringKind == '_' {
+			s.graphics(string(s.seq))
+		}
+		if s.stringKind == 'P' {
+			s.sixel(string(s.seq))
+		}
 		return
 	}
 	body := string(s.seq)
+	if strings.HasPrefix(body, "1337;File=") {
+		s.inlineImage(body)
+		return
+	}
 	if rest, ok := strings.CutPrefix(body, "8;"); ok {
 		_, uri, found := strings.Cut(rest, ";")
 		if !found {
@@ -322,6 +344,7 @@ func (s *Screen) extend(cluster string) {
 // put writes one cell, first blanking the other half of any wide character
 // it overlaps, as xterm does.
 func (s *Screen) put(x int, c cell.Cell) {
+	s.removeInline(image.Rect(x, s.Y, x+max(int(c.Width), 1), s.Y+1))
 	row := s.cells[s.Y*s.Width : (s.Y+1)*s.Width]
 	switch old := row[x]; {
 	case old.Width == 0 && x > 0 && c.Width != 0:
@@ -353,6 +376,7 @@ func (s *Screen) lineFeed() {
 // erase blanks cells from..to (exclusive) on row y and repairs wide
 // characters cut in half at either edge.
 func (s *Screen) erase(y, from, to int) {
+	s.removeInline(image.Rect(from, y, to, y+1))
 	from, to = max(from, 0), min(to, s.Width)
 	if from >= to {
 		return
@@ -446,6 +470,12 @@ func (s *Screen) dispatchCSI(seq []byte) {
 		s.hasLast = false
 	}
 	switch final {
+	case 't':
+		if p.get(0, 0) == 16 {
+			s.Replies = fmt.Appendf(s.Replies, "\x1b[6;%d;%dt", s.CellHeight, s.CellWidth)
+		} else {
+			s.errorf("unsupported window query")
+		}
 	case 'H', 'f':
 		s.Y = clamp(p.get(0, 1)-1, s.Height)
 		s.X = clamp(p.get(1, 1)-1, s.Width)
@@ -509,6 +539,9 @@ var recognized = map[int]bool{
 func clamp(v, size int) int { return min(max(v, 0), max(size-1, 0)) }
 
 func (s *Screen) setMode(mode int, on bool) {
+	if mode == 1049 && s.Modes[mode] == on {
+		return
+	}
 	s.Modes[mode] = on
 	switch mode {
 	case 25:
@@ -519,8 +552,18 @@ func (s *Screen) setMode(mode int, on bool) {
 			s.pendingWrap = false
 		}
 	case 1049:
+		if on {
+			s.mainImages, s.mainPlacements = s.Images, s.Placements
+			s.Images, s.Placements = map[uint32]ImageData{}, nil
+		}
 		for y := 0; y < s.Height; y++ {
 			s.erase(y, 0, s.Width)
+		}
+		if !on {
+			s.Images, s.Placements = s.mainImages, s.mainPlacements
+			if s.Images == nil {
+				s.Images = map[uint32]ImageData{}
+			}
 		}
 	}
 }

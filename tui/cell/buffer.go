@@ -1,6 +1,7 @@
 package cell
 
 import (
+	"image"
 	"unicode/utf8"
 
 	"github.com/DonaldMurillo/gofastr-native/tui/uni"
@@ -10,9 +11,10 @@ import (
 // or 2. A width-2 cell is followed by a continuation cell with empty Text and
 // Width 0, which carries the same style.
 type Cell struct {
-	Text  string
-	Width uint8
-	Style Style
+	Text     string
+	Width    uint8
+	Style    Style
+	Reserved bool
 }
 
 // Blank is an empty cell in the default style.
@@ -37,6 +39,8 @@ func init() {
 type Buffer struct {
 	width, height int
 	cells         []Cell
+	images        []ImagePlacement
+	nextImage     uint32
 }
 
 // NewBuffer returns a width by height buffer of blank cells.
@@ -66,6 +70,9 @@ func (b *Buffer) Resize(width, height int) {
 
 // Clear blanks every cell in the default style.
 func (b *Buffer) Clear() {
+	clear(b.images)
+	b.images = b.images[:0]
+	b.nextImage = 0
 	for i := range b.cells {
 		b.cells[i] = Blank
 	}
@@ -101,6 +108,16 @@ func (b *Buffer) Set(x, y int, text string, width int, s Style) int {
 		return 0
 	}
 	width = min(width, 2)
+	if len(b.images) != 0 {
+		left, right := x, min(x+width, b.width)
+		if b.At(x, y).Width == 0 {
+			left--
+		}
+		if b.At(right-1, y).Width == 2 {
+			right++
+		}
+		b.cutImages(image.Rect(left, y, right, y+1))
+	}
 	text = safeText(text)
 	if width == 2 && x == b.width-1 {
 		text, width = " ", 1

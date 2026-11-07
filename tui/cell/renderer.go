@@ -10,7 +10,9 @@ import (
 // Options describe what the terminal supports. The zero value is the safest
 // profile: no colors, no synchronized output, plain underlines, no links.
 type Options struct {
-	Colors ColorMode
+	Images                ImageProtocol
+	CellWidth, CellHeight int
+	Colors                ColorMode
 	// SyncOutput wraps each frame in DEC mode 2026 so it appears at once.
 	SyncOutput bool
 	// StyledUnderline enables underline shapes (4:3) and colors (58).
@@ -32,11 +34,17 @@ type Cursor struct {
 // anyone else. If a write fails partway, or another program used the
 // terminal, call Invalidate so the next frame repaints everything.
 type Renderer struct {
-	options   Options
-	front     *Buffer
-	out       []byte
-	scratch   []byte
-	alternate []byte
+	imageFrame    uint64
+	transmitted   map[uint32]imageTransmission
+	imageFull     bool
+	imageProtocol ImageProtocol
+	placements    []ImagePlacement
+	rasterChanged bool
+	options       Options
+	front         *Buffer
+	out           []byte
+	scratch       []byte
+	alternate     []byte
 
 	full        bool
 	pen         Style
@@ -78,6 +86,14 @@ func (r *Renderer) Resize(width, height int) {
 // SGR reset and no open hyperlink. Write it before restoring the terminal.
 func (r *Renderer) Reset() []byte {
 	out := []byte("\x1b[0m")
+	for id := range r.transmitted {
+		out = append(out, "\x1b_Ga=d,d=I,q=2,i="...)
+		out = strconv.AppendUint(out, uint64(id), 10)
+		out = append(out, "\x1b\\"...)
+	}
+	clear(r.transmitted)
+	clear(r.placements)
+	r.placements = r.placements[:0]
 	if r.options.Hyperlinks {
 		out = append(out, "\x1b]8;;\x1b\\"...)
 	}
@@ -98,11 +114,14 @@ func (r *Renderer) Render(back *Buffer, c Cursor) []byte {
 	}
 	start := len(r.out)
 	if r.full {
+		r.imageFull = true
 		r.repaintStart()
 	}
+	r.prepareImages(back)
 	for y := 0; y < back.height; y++ {
 		r.renderRow(back, y)
 	}
+	r.renderImages(back)
 	r.placeCursor(c, back.width, back.height)
 	if len(r.out) == start {
 		r.out = r.out[:0]
@@ -136,6 +155,11 @@ func (r *Renderer) renderRow(back *Buffer, y int) {
 	frow := r.front.cells[y*w : (y+1)*w]
 	for x := 0; x < w; {
 		bc := brow[x]
+		if bc.Reserved {
+			frow[x] = bc
+			x++
+			continue
+		}
 		if bc == frow[x] || bc.Width == 0 {
 			x++
 			continue
@@ -184,7 +208,7 @@ func blankRun(brow []Cell, x int) int {
 		return 0
 	}
 	n := 0
-	for i := x; i < len(brow) && brow[i].Text == " " && brow[i].Style == first.Style; i++ {
+	for i := x; i < len(brow) && !brow[i].Reserved && brow[i].Text == " " && brow[i].Style == first.Style; i++ {
 		n++
 	}
 	return n
@@ -224,7 +248,7 @@ func (r *Renderer) canRewrite(brow, frow []Cell, from, to int) bool {
 		return false
 	}
 	for i := from; i < to; i++ {
-		if brow[i] != frow[i] || brow[i].Width != 1 || len(brow[i].Text) != 1 || brow[i].Text[0] >= utf8.RuneSelf || r.effective(brow[i].Style) != r.pen {
+		if brow[i].Reserved || brow[i] != frow[i] || brow[i].Width != 1 || len(brow[i].Text) != 1 || brow[i].Text[0] >= utf8.RuneSelf || r.effective(brow[i].Style) != r.pen {
 			return false
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"github.com/DonaldMurillo/gofastr-native/tui/cell"
 	"github.com/DonaldMurillo/gofastr-native/tui/layout"
 	"github.com/DonaldMurillo/gofastr-native/tui/uni"
+	"image"
 )
 
 // Canvas draws one node. Coordinates are relative to the node's top-left
@@ -13,11 +14,38 @@ import (
 // already in the cell, so text drawn over a filled panel stays on the
 // panel. Fill with an explicit style to reset it.
 type Canvas struct {
-	buf    *cell.Buffer
-	origin layout.Point
-	size   layout.Size
-	clip   layout.Rect // absolute
-	method uni.Method
+	buf                   *cell.Buffer
+	origin                layout.Point
+	size                  layout.Size
+	clip                  layout.Rect // absolute
+	method                uni.Method
+	images                cell.ImageProtocol
+	cellWidth, cellHeight int
+}
+
+// ImageProtocol returns the tree's terminal graphics capability.
+func (c *Canvas) ImageProtocol() cell.ImageProtocol { return c.images }
+
+// CellPixels returns the tree's pixel geometry, defaulting to 10 by 20.
+func (c *Canvas) CellPixels() (int, int) {
+	return (cell.Options{CellWidth: c.cellWidth, CellHeight: c.cellHeight}).CellPixels()
+}
+
+// PlaceImage draws a pixel-protocol placement in node coordinates, clipping
+// both its cell rectangle and source pixels against all ancestor clips.
+func (c *Canvas) PlaceImage(img *cell.Image, rect layout.Rect, crop image.Rectangle) {
+	if c.images == cell.ImageNone || img == nil || img.Pixels == nil {
+		return
+	}
+	if crop.Empty() {
+		crop = img.Pixels.Bounds()
+	}
+	abs := image.Rect(c.origin.X+rect.X, c.origin.Y+rect.Y, c.origin.X+rect.X+rect.W, c.origin.Y+rect.Y+rect.H)
+	clip := image.Rect(c.clip.X, c.clip.Y, c.clip.X+c.clip.W, c.clip.Y+c.clip.H)
+	abs, crop = cell.ClipImage(abs, crop, clip)
+	if !abs.Empty() && !crop.Empty() {
+		c.buf.PlaceImage(img, abs, crop)
+	}
 }
 
 // Size returns the node's size.

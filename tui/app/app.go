@@ -240,6 +240,7 @@ func (a *App) run(root func(*App) view.Element, signals <-chan os.Signal, opts O
 		return err
 	}
 	a.tree = view.NewTree(caps.Method())
+	a.tree.Images, a.tree.CellWidth, a.tree.CellHeight = caps.Images, caps.CellWidth, caps.CellHeight
 	a.tree.OnCopy = func(text string) {
 		a.Copy(text)
 		if opts.Copied != nil {
